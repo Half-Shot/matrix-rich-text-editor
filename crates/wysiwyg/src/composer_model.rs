@@ -15,20 +15,21 @@
 use html5ever::parse_document;
 use html5ever::tendril::TendrilSink;
 
-use crate::owned_dom::{OwnedDom, Sink};
+use crate::dom::{DomContainer, DomCreator};
 use crate::{ActionResponse, ComposerUpdate, Location};
 
-fn parse_utf16(html: Vec<u16>) -> OwnedDom {
-    parse_document(Sink::default(), Default::default())
+fn parse_utf16(html: Vec<u16>) -> DomContainer {
+    parse_document(DomCreator::default(), Default::default())
         .from_utf8()
         .one(String::from_utf16(&html).unwrap().as_bytes())
+        .expect("Parsing failed! TODO: handle this")
 }
 
 pub struct ComposerModel<C>
 where
     C: Clone,
 {
-    dom: OwnedDom,
+    dom: DomContainer,
     rendered: Option<Vec<C>>,
     start: Location,
     end: Location,
@@ -143,8 +144,10 @@ impl ComposerModel<u16> {
         // Add a new node
         // If not in same text node, for now, refuse to do anything
 
+        dbg!(&self.dom);
+
         // TODO: find the node we are in. For now, guess the first one
-        dbg!(&self.dom.document.children.first().unwrap().node);
+        //dbg!(&self.dom.document.children.first().unwrap().node);
 
         /*
         // TODO: not a real AST
@@ -173,7 +176,7 @@ impl ComposerModel<u16> {
         if let Some(ret) = &self.rendered {
             ret.clone()
         } else {
-            let s = self.dom.to_string();
+            let s = self.dom.to_html_string();
             let rendered: Vec<u16> = s.encode_utf16().collect();
             let ret = rendered.clone();
             self.rendered = Some(rendered);

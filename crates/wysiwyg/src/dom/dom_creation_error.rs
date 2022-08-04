@@ -12,20 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod composer_action;
-mod composer_model;
-mod composer_update;
-mod dom;
-mod location;
-mod menu_state;
-mod text_update;
+use super::DomContainer;
 
-pub use crate::composer_action::ActionRequest;
-pub use crate::composer_action::ActionResponse;
-pub use crate::composer_action::ComposerAction;
-pub use crate::composer_model::ComposerModel;
-pub use crate::composer_update::ComposerUpdate;
-pub use crate::location::Location;
-pub use crate::menu_state::MenuState;
-pub use crate::text_update::ReplaceAll;
-pub use crate::text_update::TextUpdate;
+#[derive(Debug, PartialEq)]
+pub struct DomCreationError {
+    pub dom: DomContainer,
+    pub parse_errors: Vec<String>,
+}
+
+impl DomCreationError {
+    pub fn new() -> Self {
+        Self {
+            dom: DomContainer::new(),
+            parse_errors: Vec::new(),
+        }
+    }
+}

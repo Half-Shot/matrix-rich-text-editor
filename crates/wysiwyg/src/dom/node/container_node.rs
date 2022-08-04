@@ -12,20 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod composer_action;
-mod composer_model;
-mod composer_update;
-mod dom;
-mod location;
-mod menu_state;
-mod text_update;
+use html5ever::QualName;
 
-pub use crate::composer_action::ActionRequest;
-pub use crate::composer_action::ActionResponse;
-pub use crate::composer_action::ComposerAction;
-pub use crate::composer_model::ComposerModel;
-pub use crate::composer_update::ComposerUpdate;
-pub use crate::location::Location;
-pub use crate::menu_state::MenuState;
-pub use crate::text_update::ReplaceAll;
-pub use crate::text_update::TextUpdate;
+use crate::dom::DomHandle;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContainerNode {
+    name: QualName,
+    pub(crate) children: Vec<DomHandle>,
+}
+
+impl ContainerNode {
+    pub fn new(name: QualName) -> Self {
+        Self {
+            name,
+            children: Vec::new(),
+        }
+    }
+
+    pub fn name(&self) -> &QualName {
+        &self.name
+    }
+
+    pub fn append(&mut self, child: DomHandle) {
+        self.children.push(child)
+    }
+
+    pub fn children(&self) -> &Vec<DomHandle> {
+        &self.children
+    }
+}
