@@ -109,6 +109,6 @@ impl ComposerModel {
     }
 
     pub fn dump_state(self: &Arc<Self>) -> ComposerState {
-        self.inner.lock().unwrap().get_current_state().into()
+        self.inner.lock().unwrap().get_current_state_copy().into()
     }
 }
