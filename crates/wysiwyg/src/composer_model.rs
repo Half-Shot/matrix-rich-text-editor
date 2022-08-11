@@ -21,7 +21,7 @@ pub struct ComposerModel<C>
 where
     C: Clone,
 {
-    cur_state_index: usize,
+    cur_state_idx: usize,
     states: Vec<ComposerState<C>>,
 }
 
@@ -33,7 +33,7 @@ where
 {
     pub fn new() -> Self {
         Self {
-            cur_state_index: 0,
+            cur_state_idx: 0,
             states: vec![ComposerState::new()],
         }
     }
@@ -42,9 +42,10 @@ where
      * Cursor is at end.
      */
     pub fn select(&mut self, start: Location, end: Location) {
-        let cur_state = self.get_current_state_mut();
-        cur_state.start = start;
-        cur_state.end = end;
+        self.with_cur_state_mut(|state| {
+            state.start = start;
+            state.end = end;
+        })
     }
 
     /**
@@ -86,31 +87,31 @@ where
         start: usize,
         end: usize,
     ) -> ComposerUpdate<C> {
-        let mut cur_state = self.get_current_state_copy().clone();
-        // Shrink states list
-        self.states.shrink_to(self.cur_state_index as usize);
+        let mut new_state = self.get_current_state().clone();
 
-        let range = cur_state.dom.find_range_mut(start, end);
+        // Remove next states as they're no longer valid
+        self.remove_next_states();
+
+        let range = new_state.dom.find_range_mut(start, end);
         match range {
             Range::SameNode(range) => {
-                Self::replace_same_node(&mut cur_state, range, new_text);
-                cur_state.start = Location::from(start + new_text.len());
-                cur_state.end = cur_state.start;
+                Self::replace_same_node(&mut new_state, range, new_text);
+                new_state.start = Location::from(start + new_text.len());
+                new_state.end = new_state.start;
             }
 
             Range::NoNode => {
-                cur_state.dom
+                new_state.dom
                     .append(DomNode::Text(TextNode::from(new_text.to_vec())));
 
-                cur_state.start = Location::from(new_text.len());
-                cur_state.end = cur_state.start;
+                new_state.start = Location::from(new_text.len());
+                new_state.end = new_state.start;
             }
 
             _ => panic!("Can't replace_text_in in complex object models yet"),
         }
 
-        self.cur_state_index += 1;
-        self.states.push(cur_state);
+        self.push_state(new_state);
 
         // TODO: for now, we replace every time, to check ourselves, but
         // at least some of the time we should not
@@ -118,12 +119,12 @@ where
     }
 
     pub fn backspace(&mut self) -> ComposerUpdate<C> {
-        let cur_state = self.get_current_state_mut();
-        if cur_state.start == cur_state.end {
-            // Go back 1 from the current location
-            cur_state.start -= 1;
-        }
-
+        self.with_cur_state_mut(|state| {
+            if state.start == state.end {
+                // Go back 1 from the current location
+                state.start -= 1;
+            }
+        });
         self.replace_text(&[])
     }
 
@@ -131,7 +132,7 @@ where
      * Deletes text in an arbitrary start..end range.
      */
     pub fn delete_in(&mut self, start: usize, end: usize) -> ComposerUpdate<C> {
-        self.with_cur_state(|state| {
+        self.with_cur_state_mut(|state| {
             state.end = Location::from(start);
         });
         self.replace_text_in(&[], start, end)
@@ -141,7 +142,7 @@ where
      * Deletes the character after the current cursor position.
      */
     pub fn delete(&mut self) -> ComposerUpdate<C> {
-        self.with_cur_state(|state| {
+        self.with_cur_state_mut(|state| {
             if state.start == state.end {
                 state.end += 1;
             }
@@ -169,15 +170,15 @@ where
     }
 
     pub fn bold(&mut self) -> ComposerUpdate<C> {
-        let mut cur_state = self.get_current_state_copy().clone();
+        let mut new_state = self.get_current_state().clone();
 
-        // Shrink states list
-        self.states.shrink_to(self.cur_state_index as usize);
+        // Remove next states as they're no longer valid
+        self.remove_next_states();
 
         // Temporary: only works if we have a single text node
-        if cur_state.dom.children().len() == 1 {
+        if new_state.dom.children().len() == 1 {
             let (s, e) = self.safe_selection();
-            if let DomNode::Text(t) = &mut cur_state.dom.children_mut()[0] {
+            if let DomNode::Text(t) = &mut new_state.dom.children_mut()[0] {
                 let text = t.data();
                 let before = text[..s].to_vec();
                 let during = text[s..e].to_vec();
@@ -186,18 +187,17 @@ where
                 t.set_data(before);
 
                 // TODO: nicer construction of DOM nodes
-                cur_state.dom.append(DomNode::Formatting(FormattingNode::new(
+                new_state.dom.append(DomNode::Formatting(FormattingNode::new(
                     "strong".to_html(),
                     vec![DomNode::Text(TextNode::from(during))],
                 )));
 
-                cur_state.dom.append(DomNode::Text(TextNode::from(after)));
+                new_state.dom.append(DomNode::Text(TextNode::from(after)));
 
                 // TODO: for now, we replace every time, to check ourselves, but
                 // at least some of the time we should not
 
-                self.cur_state_index += 1;
-                self.states.push(cur_state);
+                self.push_state(new_state);
 
                 return self.create_update_replace_all();
             }
@@ -211,8 +211,8 @@ where
     }
 
     pub fn undo(&mut self) -> ComposerUpdate<C> {
-        if self.cur_state_index > 0 {
-            self.cur_state_index -= 1;
+        if self.cur_state_idx > 0 {
+            self.cur_state_idx -= 1;
             self.create_update_replace_all()
         } else {
             ComposerUpdate::keep()
@@ -220,28 +220,20 @@ where
     }
 
     pub fn redo(&mut self) -> ComposerUpdate<C> {
-        if (self.cur_state_index as usize) < self.states.len()-1 {
-            self.cur_state_index += 1;
+        if self.cur_state_idx < self.states.len()-1 {
+            self.cur_state_idx += 1;
             self.create_update_replace_all()
         } else {
             ComposerUpdate::keep()
         }
     }
 
-    pub fn get_current_state_copy(&self) -> ComposerState<C> {
-        self.states.get(self.cur_state_index as usize).unwrap().clone()
+    pub fn get_current_state(&self) -> &ComposerState<C> {
+        self.states.get(self.cur_state_idx as usize).unwrap()
     }
 
-    fn get_current_state(&self) -> &ComposerState<C> {
-        self.states.get(self.cur_state_index as usize).unwrap()
-    }
-
-    fn with_cur_state<R>(&mut self, block: impl Fn(&mut ComposerState<C>) -> R) -> R {
-        block(self.states.get_mut(self.cur_state_index).unwrap())
-    }
-
-    fn get_current_state_mut(&mut self) -> &mut ComposerState<C> {
-        self.states.get_mut(self.cur_state_index).unwrap()
+    fn with_cur_state_mut<R>(&mut self, block: impl Fn(&mut ComposerState<C>) -> R) -> R {
+        block(self.states.get_mut(self.cur_state_idx).unwrap())
     }
 
     // Internal functions
@@ -263,12 +255,21 @@ where
         }
     }
 
+    fn push_state(&mut self, state: ComposerState<C>) {
+        self.states.insert(self.cur_state_idx+1,state);
+        self.cur_state_idx += 1;
+    }
+
+    fn remove_next_states(&mut self) {
+        self.states.truncate(self.cur_state_idx+1);
+    }
+
     fn get_previous_states(&self) -> &[ComposerState<C>] {
-        &self.states[..(self.cur_state_index as usize)]
+        &self.states[..(self.cur_state_idx as usize)]
     }
 
     fn get_next_states(&self) -> &[ComposerState<C>] {
-        &self.states[(self.cur_state_index+1 as usize)..]
+        &self.states[(self.cur_state_idx +1 as usize)..]
     }
 }
 
@@ -514,11 +515,12 @@ mod test {
     #[test]
     fn undoing_action_restores_previous_state() {
         let mut model = cm("hello |");
-        let mut prev = model.get_current_state_copy();
+        let mut prev = model.get_current_state().clone();
         let prev_text_node = TextNode::from("world!".encode_utf16().collect::<Vec<u16>>());
         prev.dom.append(DomNode::Text(prev_text_node));
+        // Simulate a previous state existed
         model.states.insert(0, prev.clone());
-        model.cur_state_index += 1;
+        model.cur_state_idx += 1;
 
         model.undo();
 
@@ -564,18 +566,18 @@ mod test {
     #[test]
     fn undoing_action_removes_last_previous_state() {
         let mut model = cm("hello {world}|!");
-        model.states.push(model.get_current_state().clone());
+        model.push_state(model.get_current_state().clone());
 
         model.undo();
 
-        // TODO:
+        assert!(model.get_previous_states().is_empty());
     }
 
     #[test]
     fn undoing_action_adds_popped_state_to_next_states() {
         let mut model = cm("hello {world}|!");
         model.states.push(model.get_current_state().clone());
-        model.cur_state_index = 1;
+        model.cur_state_idx = 1;
 
         model.undo();
 
@@ -595,7 +597,7 @@ mod test {
     #[test]
     fn redoing_action_adds_popped_state_to_previous_states() {
         let mut model = cm("hello {world}|!");
-        model.states.push(model.get_current_state_copy());
+        model.states.push(model.get_current_state().clone());
 
         model.redo();
 
@@ -689,7 +691,7 @@ mod test {
 
         state.dom = Dom::new(vec![DomNode::Text(TextNode::from(ret_text.to_html()))]);
         ComposerModel {
-            cur_state_index: 0,
+            cur_state_idx: 0,
             states: vec![state],
         }
     }
