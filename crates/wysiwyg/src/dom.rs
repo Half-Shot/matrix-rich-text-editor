@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{Bound, BTreeMap, HashMap, HashSet};
 use std::fmt::Display;
+use std::ops::Bound::{Excluded, Included};
+use std::ops::RangeBounds;
 use crate::dom_traverser::{FindResult, NodePosition};
 
 fn utf8(input: &[u16]) -> String {
@@ -149,6 +151,30 @@ impl DomHandle {
         self.path.last().unwrap().clone()
     }
 
+    fn has_parent(&self) -> bool {
+        !self.path.is_empty()
+    }
+
+    fn prev_sibling_handle(&self) -> DomHandle {
+        assert!(self.has_parent() && self.index_in_parent() > 0);
+
+        let sibling_index = self.index_in_parent()-1;
+        let mut new_path = self.path.clone();
+        new_path.pop();
+        new_path.push(sibling_index);
+        DomHandle { path: new_path }
+    }
+
+    fn next_sibling_handle(&self) -> DomHandle {
+        assert!(self.has_parent());
+
+        let sibling_index = self.index_in_parent()+1;
+        let mut new_path = self.path.clone();
+        new_path.pop();
+        new_path.push(sibling_index);
+        DomHandle { path: new_path }
+    }
+
     pub fn raw(&self) -> &Vec<usize> {
         &self.path
     }
@@ -197,20 +223,37 @@ pub struct Dom<C>
 where
 C: Clone {
     document: DomNode<C>,
-    cache: HashMap<DomHandle, NodePosition>,
+    handles_for_start: BTreeMap<usize, HashSet<DomHandle>>,
+    handles_for_end: BTreeMap<usize, HashSet<DomHandle>>,
+    positions_for_handles: HashMap<DomHandle, NodePosition>,
 }
 
 impl<C> Dom<C>
 where
 C: Clone {
+
+    // fn update_positions_internal(
+    //     handle: DomHandle,
+    //     old_len: usize,
+    //     update_next_nodes: bool,
+    //     handles_for_positions: &mut BTreeMap<usize, HashSet<DomHandle>>,
+    //     positions_for_handles: &mut HashMap<DomHandle, NodePosition>,
+    // ) {
+    //
+    // }
+
     pub fn new(top_level_items: Vec<DomNode<C>>) -> Self {
         let mut document = ContainerNode::new(Vec::new(), top_level_items);
-        document.set_handle(DomHandle::from_raw(Vec::new()));
-
-        Self {
+        let handle = DomHandle::from_raw(Vec::new());
+        document.set_handle(handle.clone());
+        let mut instance = Self {
             document: DomNode::Container(document),
-            cache: HashMap::new(),
-        }
+            handles_for_start: BTreeMap::new(),
+            handles_for_end: BTreeMap::new(),
+            positions_for_handles: HashMap::new(),
+        };
+        instance.update_positions(handle, 0, false);
+        instance
     }
 
     fn document(&self) -> &ContainerNode<C> {
@@ -242,18 +285,143 @@ C: Clone {
     }
 
     pub fn append(&mut self, child: DomNode<C>) {
-        self.document_mut().append(child)
+        let handle = self.document_mut().append(child);
+        self.update_positions(handle, 0, false);
+    }
+
+    fn update_positions(&mut self, handle: DomHandle, old_len: usize, update_next_nodes: bool) {
+        // TODO: maybe refactor it to only update children positions and next nodes
+        let node = self.lookup_node(handle.clone()).clone();
+        let index = if handle.has_parent() { handle.index_in_parent() } else { 0 };
+        let node_len = node.len();
+        let diff_size = (node_len as i32) - (old_len as i32);
+        let mut start: usize = usize::MAX;
+        let mut end: usize = usize::MAX;
+
+        // Calculate positions
+        if handle.has_parent() {
+            if index == 0 {
+                if let Some(parent_position) = self.positions_for_handles.get(&handle.parent_handle()) {
+                    start = parent_position.start;
+                    end = start + node_len;
+                } else {
+                    // Assume Root node
+                    start = 0;
+                    end = start + node_len;
+                }
+            } else {
+                let prev_sibling_handle = handle.prev_sibling_handle();
+                if let Some(sibling_position) = self.positions_for_handles.get(&prev_sibling_handle) {
+                    start = sibling_position.end;
+                    end = start + node_len;
+                }
+            }
+        } else {
+            start = 0;
+            end = node_len;
+        }
+
+        assert_ne!(start, usize::MAX);
+
+        // Set positions
+        if handle.has_parent() {
+            self.positions_for_handles.insert(handle.clone(), NodePosition { start, end });
+            if let Some(mut cached_handles) = self.handles_for_start.get_mut(&start) {
+                cached_handles.replace(handle.clone());
+            } else {
+                self.handles_for_start.insert(start, HashSet::from([handle.clone()]));
+            }
+            if let Some(mut cached_handles) = self.handles_for_end.get_mut(&start) {
+                cached_handles.replace(handle);
+            } else {
+                self.handles_for_end.insert(start, HashSet::from([handle]));
+            }
+        }
+
+        // Update children too
+        match node {
+            DomNode::Container(node) => {
+                for mut child in node.children() {
+                    self.update_positions(child.handle(), 0, false)
+                }
+            }
+            DomNode::Formatting(node) => {
+                for mut child in node.children() {
+                    self.update_positions(child.handle(), 0, false)
+                }
+            }
+            _ => {}
+        }
+
+        // Update next nodes if needed
+        if update_next_nodes {
+            let results = self.handles_for_start.range((Included(end), Excluded(usize::MAX)));
+            for (_, handles) in results {
+                for handle in handles {
+                    if let Some(mut position) = self.positions_for_handles.get_mut(&handle) {
+                        if diff_size.is_positive() {
+                            position.start += diff_size as usize;
+                            position.end += diff_size as usize;
+                        } else {
+                            position.start -= diff_size as usize;
+                            position.end -= diff_size as usize;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn position_for_handle(&self, handle: &DomHandle) -> Option<&NodePosition> {
+        self.positions_for_handles.get(handle)
+    }
+
+    pub fn handles_for_range(&self, start: &usize, end: &usize) -> HashSet<&DomHandle> {
+        let mut results = HashSet::new();
+        // let mut start_results = self.handles_for_start.range(range.clone())
+        //     .flat_map(|(_, handles)| {
+        //         handles
+        //     }).fold(HashSet::new(), |mut acc, handle| {
+        //         acc.insert(handle);
+        //         acc
+        // });
+        // let end_results = self.handles_for_end.range(range)
+        //     .flat_map(|(_, handles)| {
+        //         handles
+        //     }).fold(HashSet::new(), |mut acc, handle| {
+        //     acc.insert(handle);
+        //     acc
+        // });
+        // start_results.extend(end_results);
+        // start_results
+        for (i, handles) in self.handles_for_start.iter() {
+            // We already passed the limit
+            if i > end {
+                return results;
+            }
+            for handle in handles {
+                if let Some(pos) = self.position_for_handle(handle) {
+                    if &pos.end >= start {
+                        results.insert(handle);
+                    }
+                }
+            }
+        }
+        results
     }
 
     pub fn replace(&mut self, node_handle: DomHandle, nodes: Vec<DomNode<C>>) {
-        let parent_node = self.lookup_node_mut(node_handle.parent_handle());
+        let parent_handle = node_handle.parent_handle();
+        let parent_node = self.lookup_node_mut(parent_handle.clone());
+        let parent_len = parent_node.len();
         let index = node_handle.index_in_parent();
         let result = match parent_node {
             DomNode::Text(_n) => panic!("Text nodes can't have children"),
             DomNode::Formatting(n) => n.replace_child(index, nodes),
             DomNode::Container(n) => n.replace_child(index, nodes),        
         };
-        self.clear_cached_positions();
+        // It should be better to only update the replaced nodes
+        self.update_positions(parent_handle, parent_len, true);
         result
     }
 
@@ -268,7 +436,13 @@ C: Clone {
         let mut results = Vec::new();
         self.find_pos(self.document_handle(), start, end, 0, &mut results);
         let found: Vec<&FindResult> = results.iter()
-            .filter(|result| result.is_found() )
+            .filter(|result| {
+                if let DomNode::Text(node) = self.lookup_node(result.handle().clone()) {
+                    true
+                } else {
+                    false
+                }
+            })
             .collect();
 
         // TODO: needs careful handling when on the boundary of 2 ranges:
@@ -362,18 +536,6 @@ C: Clone {
         }
         node
     }
-
-    pub fn get_cached_position(&self, handle: &DomHandle) -> Option<&NodePosition> {
-        self.cache.get(handle)
-    }
-
-    pub fn set_cached_position(&mut self, handle: DomHandle, position: NodePosition) {
-        self.cache.insert(handle, position);
-    }
-
-    pub fn clear_cached_positions(&mut self) {
-        self.cache.clear();
-    }
 }
 
 impl<C> ToHtml<C> for Dom<C>
@@ -417,13 +579,22 @@ C: Clone {
         }
     }
 
-    pub fn append(&mut self, mut child: DomNode<C>) {
+    pub fn append(&mut self, mut child: DomNode<C>) -> DomHandle {
         assert!(self.handle.is_valid());
 
         let child_index = self.children.len();
         let child_handle = self.handle.child_handle(child_index);
-        child.set_handle(child_handle);
+        child.set_handle(child_handle.clone());
         self.children.push(child);
+        child_handle
+    }
+
+    pub fn len(&self) -> usize {
+        let mut total_length = 0;
+        for child in &self.children {
+            total_length += child.len()
+        }
+        total_length
     }
 
     fn replace_child(&mut self, index: usize, nodes: Vec<DomNode<C>>) {
@@ -503,6 +674,14 @@ C: Clone {
             children,
             handle: DomHandle::new_invalid(),
         }
+    }
+
+    pub fn len(&self) -> usize {
+        let mut total_length = 0;
+        for child in &self.children {
+            total_length += child.len()
+        }
+        total_length
     }
 
     fn handle(&self) -> DomHandle {
@@ -608,6 +787,10 @@ impl<C> TextNode<C> {
         self.data = data;
     }
 
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
     fn handle(&self) -> DomHandle {
         self.handle.clone()
     }
@@ -641,6 +824,14 @@ C: Clone {
             DomNode::Container(n) => n.handle(),
             DomNode::Formatting(n) => n.handle(),
             DomNode::Text(n) => n.handle(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Text(node) => node.len(),
+            Self::Formatting(node) => node.len(),
+            Self::Container(node) => node.len(),
         }
     }
 
@@ -853,6 +1044,44 @@ mod test {
     #[test]
     fn empty_tag_serialises() {
         assert_eq!(dom(&[b(&[]),]).to_string(), "<b></b>");
+    }
+
+    #[test]
+    fn new_adds_cached_positions() {
+        let mut d = dom(&[tx("Node"), tx("Another")]);
+        assert_eq!(1, d.handles_for_start.get(&0).unwrap().len()); // Root & 'Node'
+        assert_eq!(1, d.handles_for_start.get(&4).unwrap().len()); // 'Another'
+        assert_eq!(2, d.positions_for_handles.len());
+
+        let start_handle = DomHandle { path: vec![0] };
+        let text_node = d.lookup_node(start_handle.clone());
+        assert_eq!(1, d.handles_for_start.get(&0).unwrap().len());
+        assert_eq!(0, d.positions_for_handles.get(&start_handle).unwrap().start);
+        assert_eq!(4, d.positions_for_handles.get(&DomHandle { path: vec![1] }).unwrap().start);
+    }
+
+    #[test]
+    fn append_adds_cached_positions() {
+        let mut d = dom(&[]);
+        d.append(tx("Node"));
+        assert_eq!(1, d.handles_for_start.get(&0).unwrap().len());
+        assert_eq!(1, d.positions_for_handles.len());
+
+        let dom_handle = DomHandle { path: vec![0] };
+        let text_node = d.lookup_node(dom_handle.clone());
+        assert_eq!(1, d.handles_for_start.get(&0).unwrap().len());
+        assert_eq!(0, d.positions_for_handles.get(&dom_handle).unwrap().start);
+    }
+
+    #[test]
+    fn replace_adds_cached_positions() {
+        let mut d = dom(&[tx("Old"), tx("Node")]);
+        let handle = DomHandle { path: vec![0] };
+        d.replace(handle, vec![tx("BrandNew")]);
+
+        assert_eq!(1, d.handles_for_start.get(&0).unwrap().len());
+        let start = d.positions_for_handles.get(&DomHandle { path: vec![1] }).unwrap().start;
+        assert_eq!(8, start);
     }
 
     /*#[test]

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound::{Excluded, Included};
 use crate::dom::{Dom, DomNode, DomHandle, Element};
 
 #[derive(Debug, PartialEq, Clone)]
@@ -28,6 +29,7 @@ pub enum FindResult {
         offset: usize,
     },
     NotFound {
+        node_handle: DomHandle,
         position: NodePosition,
     },
 }
@@ -41,10 +43,17 @@ impl FindResult {
         }
     }
 
+    pub fn handle(&self) -> &DomHandle {
+        match self {
+            FindResult::Found { node_handle, position, offset } => node_handle,
+            FindResult::NotFound { node_handle, position } => node_handle
+        }
+    }
+
     pub fn position(&self) -> &NodePosition {
         match self {
             FindResult::Found { node_handle, position, offset } => position,
-            FindResult::NotFound { position } => position
+            FindResult::NotFound { position, node_handle } => position
         }
     }
 }
@@ -59,70 +68,78 @@ C: Clone {
                 offset: usize,
                 results: &mut Vec<FindResult>
     ) {
-
-        fn process_element<'a, C: 'a + Clone>(
-            dom: &mut Dom<C>,
-            element: &'a impl Element<'a, C>,
-            start: usize,
-            end: usize,
-            offset: usize,
-            results: &mut Vec<FindResult>,
-        ) {
-            let mut off = offset;
-            for child in element.children() {
-                let child_handle = child.handle();
-                assert!(
-                    !child_handle.raw().is_empty(),
-                    "Invalid child handle!"
-                );
-                match results.last() {
-                    Some(find_child) => {
-                        off = find_child.position().end.clone();
-                    }
-                    _ => {}
-                }
-                dom.find_pos(child_handle, start, end, off, results);
+        //
+        // fn process_element<'a, C: 'a + Clone>(
+        //     dom: &mut Dom<C>,
+        //     element: &'a impl Element<'a, C>,
+        //     start: usize,
+        //     end: usize,
+        //     offset: usize,
+        //     results: &mut Vec<FindResult>,
+        // ) {
+        //     let mut off = offset;
+        //     for child in element.children() {
+        //         let child_handle = child.handle();
+        //         assert!(
+        //             !child_handle.raw().is_empty(),
+        //             "Invalid child handle!"
+        //         );
+        //         match results.last() {
+        //             Some(find_child) => {
+        //                 off = find_child.position().end.clone();
+        //             }
+        //             _ => {}
+        //         }
+        //         dom.find_pos(child_handle, start, end, off, results);
+        //     }
+        // }
+        //
+        // // TODO: consider whether cloning DomHandles is damaging performance,
+        // // and look for ways to pass around references, maybe.
+        // if offset > end {
+        //     return;
+        // }
+        // let node = self.lookup_node(node_handle.clone()).clone();
+        // match node {
+        //     DomNode::Text(n) => {
+        //         let len = n.data().len();
+        //         let position = NodePosition { start: offset, end: offset + len };
+        //         if start <= offset + len {
+        //             let new_offset = if start >= offset {
+        //                 start - offset
+        //             } else { 0 };
+        //             results.push(
+        //                 FindResult::Found {
+        //                     node_handle,
+        //                     position: NodePosition { start: offset, end: offset + len },
+        //                     offset: new_offset, // TODO: this offset might be wrong
+        //                 }
+        //             )
+        //         } else {
+        //             results.push(
+        //                 FindResult::NotFound {
+        //                     position,
+        //                 }
+        //             )
+        //         }
+        //     }
+        //     DomNode::Formatting(n) => process_element(self, &n, start, end, offset, results),
+        //     DomNode::Container(n) => process_element(self, &n, start, end, offset, results),
+        // }
+        if let handles = self.handles_for_range(&start, &end) {
+            for handle in handles {
+                let position = self.position_for_handle(&handle.clone()).unwrap();
+                let new_offset = if start >= position.start {
+                    start - position.start
+                } else { 0 };
+                results.push(
+                    FindResult::Found {
+                        node_handle: handle.clone(),
+                        position: position.clone(),
+                        offset: new_offset,
+                    });
             }
         }
-
-        // TODO: consider whether cloning DomHandles is damaging performance,
-        // and look for ways to pass around references, maybe.
-        if offset > end {
-            return;
-        }
-        let node = self.lookup_node(node_handle.clone()).clone();
-        match node {
-            DomNode::Text(n) => {
-                let len = n.data().len();
-                let position = if let Some(position) = self.get_cached_position(&node_handle) {
-                    position.clone()
-                } else {
-                    NodePosition { start: offset, end: offset + len }
-                };
-                if start <= offset + len {
-                    let new_offset = if start >= offset {
-                        start - offset
-                    } else { 0 };
-                    self.set_cached_position(node_handle.clone(), position.clone());
-                    results.push(
-                        FindResult::Found {
-                            node_handle,
-                            position: NodePosition { start: offset, end: offset + len },
-                            offset: new_offset, // TODO: this offset might be wrong
-                        }
-                    )
-                } else {
-                    self.set_cached_position(node_handle.clone(), position.clone());
-                    results.push(
-                        FindResult::NotFound {
-                            position,
-                        }
-                    )
-                }
-            }
-            DomNode::Formatting(n) => process_element(self, &n, start, end, offset, results),
-            DomNode::Container(n) => process_element(self, &n, start, end, offset, results),
-        };
     }
 }
 
