@@ -52,7 +52,7 @@ impl FindResult {
 impl <C> Dom<C>
 where
 C: Clone {
-    pub fn find_pos(&self,
+    pub fn find_pos(&mut self,
                 node_handle: DomHandle,
                 start: usize,
                 end: usize,
@@ -61,7 +61,7 @@ C: Clone {
     ) {
 
         fn process_element<'a, C: 'a + Clone>(
-            dom: &Dom<C>,
+            dom: &mut Dom<C>,
             element: &'a impl Element<'a, C>,
             start: usize,
             end: usize,
@@ -94,10 +94,16 @@ C: Clone {
         match node {
             DomNode::Text(n) => {
                 let len = n.data().len();
+                let position = if let Some(position) = self.get_cached_position(&node_handle) {
+                    position.clone()
+                } else {
+                    NodePosition { start: offset, end: offset + len }
+                };
                 if start <= offset + len {
                     let new_offset = if start >= offset {
                         start - offset
                     } else { 0 };
+                    self.set_cached_position(node_handle.clone(), position.clone());
                     results.push(
                         FindResult::Found {
                             node_handle,
@@ -106,15 +112,16 @@ C: Clone {
                         }
                     )
                 } else {
+                    self.set_cached_position(node_handle.clone(), position.clone());
                     results.push(
                         FindResult::NotFound {
-                            position: NodePosition { start: offset, end: offset + len },
+                            position,
                         }
                     )
                 }
             }
-            DomNode::Formatting(n) => process_element(&self, &n, start, end, offset, results),
-            DomNode::Container(n) => process_element(&self, &n, start, end, offset, results),
+            DomNode::Formatting(n) => process_element(self, &n, start, end, offset, results),
+            DomNode::Container(n) => process_element(self, &n, start, end, offset, results),
         };
     }
 }

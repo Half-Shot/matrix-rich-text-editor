@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use crate::dom_traverser::{FindResult, NodePosition};
 
@@ -196,6 +197,7 @@ pub struct Dom<C>
 where
 C: Clone {
     document: DomNode<C>,
+    cache: HashMap<DomHandle, NodePosition>,
 }
 
 impl<C> Dom<C>
@@ -207,6 +209,7 @@ C: Clone {
 
         Self {
             document: DomNode::Container(document),
+            cache: HashMap::new(),
         }
     }
 
@@ -245,11 +248,13 @@ C: Clone {
     pub fn replace(&mut self, node_handle: DomHandle, nodes: Vec<DomNode<C>>) {
         let parent_node = self.lookup_node_mut(node_handle.parent_handle());
         let index = node_handle.index_in_parent();
-        match parent_node {
+        let result = match parent_node {
             DomNode::Text(_n) => panic!("Text nodes can't have children"),
             DomNode::Formatting(n) => n.replace_child(index, nodes),
             DomNode::Container(n) => n.replace_child(index, nodes),        
-        }
+        };
+        self.clear_cached_positions();
+        result
     }
 
     pub fn find_range_mut(&mut self, start: usize, end: usize) -> Range {
@@ -356,6 +361,18 @@ C: Clone {
             }
         }
         node
+    }
+
+    pub fn get_cached_position(&self, handle: &DomHandle) -> Option<&NodePosition> {
+        self.cache.get(handle)
+    }
+
+    pub fn set_cached_position(&mut self, handle: DomHandle, position: NodePosition) {
+        self.cache.insert(handle, position);
+    }
+
+    pub fn clear_cached_positions(&mut self) {
+        self.cache.clear();
     }
 }
 
