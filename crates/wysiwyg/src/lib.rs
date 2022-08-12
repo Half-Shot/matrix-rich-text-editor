@@ -17,6 +17,7 @@ mod composer_model;
 mod composer_state;
 mod composer_update;
 mod dom;
+mod dom_traverser;
 mod location;
 mod menu_state;
 mod text_update;

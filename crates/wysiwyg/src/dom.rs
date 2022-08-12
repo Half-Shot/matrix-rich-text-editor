@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use std::fmt::Display;
+use crate::dom_traverser::{FindResult, NodePosition};
 
 fn utf8(input: &[u16]) -> String {
     String::from_utf16(input).expect("Invalid UTF-16!")
 }
 
-trait Element<'a, C> {
+pub trait Element<'a, C>
+where
+C: Clone {
     fn name(&'a self) -> &'a Vec<C>;
     fn children(&'a self) -> &'a Vec<DomNode<C>>;
     fn children_mut(&'a mut self) -> &'a mut Vec<DomNode<C>>;
@@ -112,7 +115,7 @@ impl ToHtml<u16> for String {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DomHandle {
     // Later, we will want to allow continuing iterating from this handle, and
     // comparing handles to see which is first in the iteration order. This
@@ -121,7 +124,7 @@ pub struct DomHandle {
 }
 
 impl DomHandle {
-    fn from_raw(path: Vec<usize>) -> Self {
+    pub fn from_raw(path: Vec<usize>) -> Self {
         Self { path }
     }
 
@@ -145,7 +148,7 @@ impl DomHandle {
         self.path.last().unwrap().clone()
     }
 
-    fn raw(&self) -> &Vec<usize> {
+    pub fn raw(&self) -> &Vec<usize> {
         &self.path
     }
 
@@ -188,23 +191,16 @@ pub enum Range {
     NoNode,
 }
 
-#[derive(Debug, PartialEq)]
-enum FindResult {
-    Found {
-        node_handle: DomHandle,
-        offset: usize,
-    },
-    NotFound {
-        new_offset: usize,
-    },
-}
-
 #[derive(Clone, Debug, PartialEq)]
-pub struct Dom<C> {
+pub struct Dom<C>
+where
+C: Clone {
     document: DomNode<C>,
 }
 
-impl<C> Dom<C> {
+impl<C> Dom<C>
+where
+C: Clone {
     pub fn new(top_level_items: Vec<DomNode<C>>) -> Self {
         let mut document = ContainerNode::new(Vec::new(), top_level_items);
         document.set_handle(DomHandle::from_raw(Vec::new()));
@@ -264,94 +260,42 @@ impl<C> Dom<C> {
         // Potentially silly to walk the tree twice to find both parts, but
         // care will be needed since end may be before start. Very unlikely to
         // be a performance bottleneck, so it's probably fine like this.
-        let find_start = self.find_pos(self.document_handle(), start);
-        let find_end = self.find_pos(self.document_handle(), end);
+        let mut results = Vec::new();
+        self.find_pos(self.document_handle(), start, end, 0, &mut results);
+        let found: Vec<&FindResult> = results.iter()
+            .filter(|result| result.is_found() )
+            .collect();
 
         // TODO: needs careful handling when on the boundary of 2 ranges:
         // we want to be greedy about when we state something is the same range
         // - maybe find_pos should return 2 nodes when we are on the boundary?
-        match (find_start, find_end) {
-            (
-                FindResult::Found {
-                    node_handle: start_handle,
-                    offset: start_offset,
-                },
-                FindResult::Found {
-                    node_handle: end_handle,
-                    offset: end_offset,
-                },
-            ) => {
-                if start_handle == end_handle {
+        match found.len() {
+            1 => {
+                if let FindResult::Found { node_handle, position, offset} = found[0] {
                     Range::SameNode(SameNodeRange {
-                        node_handle: start_handle,
-                        start_offset,
-                        end_offset,
+                        node_handle: node_handle.clone(),
+                        start_offset: start - position.start,
+                        end_offset: end - position.start,
                     })
                 } else {
-                    Range::TooDifficultForMe
+                    panic!("There should be a single Found result, but there isn't.")
                 }
             }
-            _ => Range::TooDifficultForMe,
+            0 => {
+                Range::NoNode
+            }
+            _ => Range::TooDifficultForMe
         }
     }
 
-    fn find_pos(&self, node_handle: DomHandle, offset: usize) -> FindResult {
-        // TODO: consider whether cloning DomHandles is damaging performance,
-        // and look for ways to pass around references, maybe.
-        fn process_element<'a, C: 'a>(
-            dom: &Dom<C>,
-            element: &'a impl Element<'a, C>,
-            offset: usize,
-        ) -> FindResult {
-            let mut off = offset;
-            for child in element.children() {
-                let child_handle = child.handle();
-                assert!(
-                    !child_handle.raw().is_empty(),
-                    "Invalid child handle!"
-                );
-                let find_child = dom.find_pos(child_handle, off);
-                //let find_child = FindResult::NotFound { new_offset: offset };
-                match find_child {
-                    FindResult::Found { .. } => {
-                        return find_child;
-                    }
-                    FindResult::NotFound { new_offset } => {
-                        off = new_offset;
-                    }
-                }
-            }
-            FindResult::NotFound { new_offset: off }
-        }
-
-        let node = self.lookup_node(node_handle.clone());
-        match node {
-            DomNode::Text(n) => {
-                let len = n.data().len();
-                if offset <= len {
-                    FindResult::Found {
-                        node_handle,
-                        offset,
-                    }
-                } else {
-                    FindResult::NotFound {
-                        new_offset: offset - len,
-                    }
-                }
-            }
-            DomNode::Formatting(n) => process_element(self, n, offset),
-            DomNode::Container(n) => process_element(self, n, offset),
-        }
-    }
-
-    fn document_handle(&self) -> DomHandle {
+    pub fn document_handle(&self) -> DomHandle {
         self.document.handle()
     }
 
     /// Find the node based on its handle.
     /// Panics if the handle is invalid
     pub fn lookup_node(&self, node_handle: DomHandle) -> &DomNode<C> {
-        fn nth_child<'a, C>(
+        fn nth_child<'a, C: Clone>(
             element: &'a impl Element<'a, C>,
             idx: usize,
         ) -> &DomNode<C> {
@@ -389,7 +333,7 @@ impl<C> Dom<C> {
         node_handle: DomHandle,
     ) -> &mut DomNode<C> {
         // TODO: horrible that we repeat lookup_node's logic. Can we share?
-        fn nth_child<'a, C>(
+        fn nth_child<'a, C: Clone>(
             element: &'a mut impl Element<'a, C>,
             idx: usize,
         ) -> &mut DomNode<C> {
@@ -433,13 +377,17 @@ impl Display for Dom<u16> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ContainerNode<C> {
+pub struct ContainerNode<C>
+where
+C: Clone {
     name: Vec<C>,
     children: Vec<DomNode<C>>,
     handle: DomHandle,
 }
 
-impl<C> ContainerNode<C> {
+impl<C> ContainerNode<C>
+where
+C: Clone {
     /// Create a new ContainerNode
     ///
     /// NOTE: Its handle() will be invalid until you call set_handle() or
@@ -492,7 +440,9 @@ impl<C> ContainerNode<C> {
     }
 }
 
-impl<'a, C> Element<'a, C> for ContainerNode<C> {
+impl<'a, C> Element<'a, C> for ContainerNode<C>
+where
+C: Clone {
     fn name(&'a self) -> &'a Vec<C> {
         &self.name
     }
@@ -515,13 +465,17 @@ impl ToHtml<u16> for ContainerNode<u16> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct FormattingNode<C> {
+pub struct FormattingNode<C>
+where
+C: Clone{
     name: Vec<C>,
     children: Vec<DomNode<C>>,
     handle: DomHandle,
 }
 
-impl<C> FormattingNode<C> {
+impl<C> FormattingNode<C>
+where
+C: Clone {
     /// Create a new FormattingNode
     ///
     /// NOTE: Its handle() will be invalid until you call set_handle() or
@@ -577,7 +531,7 @@ impl<C> FormattingNode<C> {
     }
 }
 
-impl<'a, C> Element<'a, C> for FormattingNode<C> {
+impl<'a, C: Clone> Element<'a, C> for FormattingNode<C> {
     fn name(&'a self) -> &'a Vec<C> {
         &self.name
     }
@@ -653,14 +607,18 @@ impl ToHtml<u16> for TextNode<u16> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum DomNode<C> {
+pub enum DomNode<C>
+where
+C: Clone {
     Container(ContainerNode<C>),   // E.g. html, div
     Formatting(FormattingNode<C>), // E.g. b, i
     // TODO Item(ItemNode<C>),             // E.g. a, pills
     Text(TextNode<C>),
 }
 
-impl<C> DomNode<C> {
+impl<C> DomNode<C>
+where
+C: Clone {
     pub fn handle(&self) -> DomHandle {
         match self {
             DomNode::Container(n) => n.handle(),
@@ -735,7 +693,7 @@ mod test {
     }
 
     /// If this node is an element, return its children - otherwise panic
-    fn kids<C>(node: &DomNode<C>) -> &Vec<DomNode<C>> {
+    fn kids<C: Clone>(node: &DomNode<C>) -> &Vec<DomNode<C>> {
         match node {
             DomNode::Container(n) => n.children(),
             DomNode::Formatting(n) => n.children(),
@@ -878,158 +836,6 @@ mod test {
     #[test]
     fn empty_tag_serialises() {
         assert_eq!(dom(&[b(&[]),]).to_string(), "<b></b>");
-    }
-
-    // Finding nodes
-
-    #[test]
-    fn finding_a_node_within_an_empty_dom_returns_not_found() {
-        let d: Dom<u16> = dom(&[]);
-        assert_eq!(
-            d.find_pos(d.document_handle(), 0),
-            FindResult::NotFound { new_offset: 0 }
-        );
-    }
-
-    #[test]
-    fn finding_a_node_within_a_single_text_node_is_found() {
-        let d: Dom<u16> = dom(&[tx("foo")]);
-        assert_eq!(
-            d.find_pos(d.document_handle(), 1),
-            FindResult::Found {
-                node_handle: DomHandle::from_raw(vec![0]),
-                offset: 1
-            }
-        );
-    }
-
-    #[test]
-    fn finding_a_node_within_flat_text_nodes_is_found() {
-        let d: Dom<u16> = dom(&[tx("foo"), tx("bar")]);
-        assert_eq!(
-            d.find_pos(d.document_handle(), 0),
-            FindResult::Found {
-                node_handle: DomHandle::from_raw(vec![0]),
-                offset: 0
-            }
-        );
-        assert_eq!(
-            d.find_pos(d.document_handle(), 1),
-            FindResult::Found {
-                node_handle: DomHandle::from_raw(vec![0]),
-                offset: 1
-            }
-        );
-        assert_eq!(
-            d.find_pos(d.document_handle(), 2),
-            FindResult::Found {
-                node_handle: DomHandle::from_raw(vec![0]),
-                offset: 2
-            }
-        );
-        // TODO: selections at boundaries need work
-        /*
-        assert_eq!(
-            d.find_pos(d.document_handle(), 3),
-            FindResult::Found {
-                node_handle: DomHandle::from_raw(vec![1]),
-                offset: 0
-            }
-        );
-        assert_eq!(
-            d.find_pos(d.document_handle(), 4),
-            FindResult::Found {
-                node_handle: DomHandle::from_raw(vec![1]),
-                offset: 1
-            }
-        );
-        assert_eq!(
-            d.find_pos(d.document_handle(), 5),
-            FindResult::Found {
-                node_handle: DomHandle::from_raw(vec![1]),
-                offset: 2
-            }
-        );
-        */
-        assert_eq!(
-            d.find_pos(d.document_handle(), 6),
-            FindResult::Found {
-                node_handle: DomHandle::from_raw(vec![1]),
-                offset: 3
-            }
-        );
-    }
-
-    // TODO: comprehensive test like above for non-flat nodes
-
-    #[test]
-    fn finding_a_range_within_an_empty_dom_returns_no_node() {
-        let mut d: Dom<u16> = dom(&[]);
-        let range = d.find_range_mut(0, 0);
-        assert_eq!(range, Range::NoNode);
-    }
-
-    #[test]
-    fn finding_a_range_within_the_single_text_node_works() {
-        let mut d = dom(&[tx("foo bar baz")]);
-        let range = d.find_range_mut(4, 7);
-
-        if let Range::SameNode(range) = range {
-            assert_eq!(range.start_offset, 4);
-            assert_eq!(range.end_offset, 7);
-
-            if let DomNode::Text(t) = d.lookup_node(range.node_handle.clone()) {
-                assert_eq!(t.data(), "foo bar baz".to_html());
-            } else {
-                panic!("Should have been a text node!")
-            }
-
-            assert_eq!(range.node_handle.raw(), &vec![0]);
-        } else {
-            panic!("Should have been a SameNodeRange: {:?}", range)
-        }
-    }
-
-    #[test]
-    fn finding_a_range_that_includes_the_end_works_simple_case() {
-        let mut d = dom(&[tx("foo bar baz")]);
-        let range = d.find_range_mut(4, 11);
-
-        if let Range::SameNode(range) = range {
-            assert_eq!(range.start_offset, 4);
-            assert_eq!(range.end_offset, 11);
-
-            if let DomNode::Text(t) = d.lookup_node(range.node_handle.clone()) {
-                assert_eq!(t.data(), "foo bar baz".to_html());
-            } else {
-                panic!("Should have been a text node!")
-            }
-
-            assert_eq!(range.node_handle.raw(), &vec![0]);
-        } else {
-            panic!("Should have been a SameNodeRange: {:?}", range)
-        }
-    }
-
-    #[test]
-    fn finding_a_range_within_some_nested_node_works() {
-        let mut d = dom(&[tx("foo "), b(&[tx("bar")]), tx(" baz")]);
-        let range = d.find_range_mut(5, 6);
-
-        if let Range::SameNode(range) = range {
-            assert_eq!(range.start_offset, 1);
-            assert_eq!(range.end_offset, 2);
-
-            if let DomNode::Text(t) = d.lookup_node(range.node_handle.clone()) {
-                assert_eq!(t.data(), "bar".to_html());
-            } else {
-                panic!("Should have been a text node!")
-            }
-
-            assert_eq!(range.node_handle.raw(), &vec![1, 0]);
-        } else {
-            panic!("Should have been a SameNodeRange: {:?}", range)
-        }
     }
 
     /*#[test]
