@@ -19,12 +19,18 @@ use crate::dom::to_html::ToHtml;
 use html_escape;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct TextNode<C> {
+pub struct TextNode<C>
+where
+    C: Clone,
+{
     data: Vec<C>,
     handle: DomHandle,
 }
 
-impl<C> TextNode<C> {
+impl<C> TextNode<C>
+where
+    C: Clone,
+{
     /// Create a new TextNode
     ///
     /// NOTE: Its handle() will be unset until you call set_handle() or

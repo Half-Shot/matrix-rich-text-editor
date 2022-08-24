@@ -15,7 +15,7 @@
 use crate::dom::nodes::{ContainerNode, DomNode, TextNode};
 use crate::dom::parser::PaNodeContainer;
 use crate::dom::{Dom, DomCreationError};
-use crate::ToHtml;
+use crate::{InlineFormatType, ToHtml};
 
 use super::padom_node::PaDomNode;
 use super::{PaDom, PaDomCreationError, PaDomCreator};
@@ -56,6 +56,7 @@ fn padom_to_dom_u16(padom: PaDom) -> Dom<u16> {
     fn new_formatting(tag: &str) -> DomNode<u16> {
         DomNode::Container(ContainerNode::new_formatting(
             tag.to_html(),
+            InlineFormatType::from(tag),
             Vec::new(),
         ))
     }

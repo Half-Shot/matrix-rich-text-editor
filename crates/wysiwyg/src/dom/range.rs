@@ -52,32 +52,40 @@ pub struct SameNodeRange {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DomLocation {
     pub node_handle: DomHandle,
+    pub position: usize,
     pub start_offset: usize,
     pub end_offset: usize,
     pub location_type: RangeLocationType,
+    pub is_leaf: bool,
 }
 
 impl DomLocation {
     pub fn new(
         node_handle: DomHandle,
+        position: usize,
         start_offset: usize,
         end_offset: usize,
         location_type: RangeLocationType,
+        is_leaf: bool,
     ) -> Self {
         Self {
             node_handle,
+            position,
             start_offset,
             end_offset,
             location_type,
+            is_leaf,
         }
     }
 
     pub fn reversed(&self) -> Self {
         Self {
             node_handle: self.node_handle.clone(),
+            position: self.position,
             start_offset: self.end_offset,
             end_offset: self.start_offset,
             location_type: self.location_type,
+            is_leaf: self.is_leaf,
         }
     }
 }

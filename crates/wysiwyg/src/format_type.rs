@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum InlineFormatType {
     Bold,
     Italic,
@@ -29,6 +29,17 @@ impl InlineFormatType {
             InlineFormatType::StrikeThrough => "del",
             InlineFormatType::Underline => "u",
             InlineFormatType::InlineCode => "code",
+        }
+    }
+
+    pub fn from(tag: &str) -> Self {
+        match tag {
+            "b" | "strong" => InlineFormatType::Bold,
+            "i" | "em" => InlineFormatType::Italic,
+            "del" => InlineFormatType::StrikeThrough,
+            "u" => InlineFormatType::Underline,
+            "code" => InlineFormatType::InlineCode,
+            _ => panic!("Not valid tag found for formatting {}", tag),
         }
     }
 }

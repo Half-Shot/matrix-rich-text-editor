@@ -251,6 +251,27 @@ pub fn tx(model: &ComposerModel<u16>) -> String {
         }
         Range::NoNode => panic!("No node!"),
         Range::MultipleNodes(range) => {
+            let leaf_nodes: Vec<&DomLocation> =
+                range.locations.iter().filter(|loc| loc.is_leaf).collect();
+
+            // Exception when a single text node is found
+            if leaf_nodes.len() == 1 {
+                let loc = leaf_nodes.first().unwrap();
+                if let DomNode::Text(n) =
+                    dom.lookup_node_mut(loc.node_handle.clone())
+                {
+                    update_text_node_with_cursor(
+                        n,
+                        &SameNodeRange {
+                            node_handle: n.handle(),
+                            start_offset: loc.start_offset,
+                            end_offset: loc.end_offset,
+                        },
+                    );
+                    return dom.to_string();
+                }
+            }
+
             // Update start node selection
             let start_text_node_location = range
                 .locations

@@ -224,6 +224,7 @@ mod test {
     use crate::dom::to_html::fmt_node_u16;
     use crate::dom::HtmlFormatter;
     use crate::tests::testutils_dom::{a, b, dom, i, i_c, tn};
+    use crate::InlineFormatType;
 
     /// If this node is an element, return its children - otherwise panic
     fn kids<C: Clone>(node: &DomNode<C>) -> &Vec<DomNode<C>> {
@@ -244,6 +245,7 @@ mod test {
             DomNode::Text(TextNode::from("a".to_html())),
             DomNode::new_formatting(
                 "b".to_html(),
+                InlineFormatType::Bold,
                 vec![DomNode::Text(TextNode::from("b".to_html()))],
             ),
         ]);
@@ -259,6 +261,7 @@ mod test {
             DomNode::Text(TextNode::from("a".to_html())),
             DomNode::new_formatting(
                 "b".to_html(),
+                InlineFormatType::Bold,
                 vec![DomNode::Text(TextNode::from("b".to_html()))],
             ),
         ]);

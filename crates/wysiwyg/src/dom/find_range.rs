@@ -194,14 +194,15 @@ fn process_container_node<C: Clone>(
         // We want to include the container node only if we traversed through it.
         // That is, going from at least container_start-1 to container_end 
         // or from at least container_start to container_end+1.
-        && ((start < container_start && container_end <= end)
-        || (start <= container_start && container_end < end))
+        && start <= container_start && container_end <= end
     {
         results.push(DomLocation {
             node_handle: node.handle(),
+            position: container_start,
             start_offset: 0,
             end_offset: container_node_len,
             location_type: RangeLocationType::Middle,
+            is_leaf: false,
         })
     }
     results
@@ -239,9 +240,11 @@ fn process_text_node<C: Clone>(
 
         Some(DomLocation {
             node_handle: node.handle(),
+            position: node_start,
             start_offset,
             end_offset,
             location_type: RangeLocationType::Middle,
+            is_leaf: true,
         })
     }
 }
@@ -257,15 +260,19 @@ mod test {
 
     fn found_single_node(
         handle: DomHandle,
+        position: usize,
         start_offset: usize,
         end_offset: usize,
         location_type: RangeLocationType,
+        is_leaf: bool,
     ) -> FindResult {
         FindResult::Found(vec![DomLocation {
             node_handle: handle,
+            position,
             start_offset,
             end_offset,
             location_type,
+            is_leaf,
         }])
     }
 
@@ -298,9 +305,11 @@ mod test {
             find_pos(&d, d.document_handle(), 1, 1),
             found_single_node(
                 DomHandle::from_raw(vec![0]),
+                0,
                 1,
                 1,
-                RangeLocationType::Middle
+                RangeLocationType::Middle,
+                true,
             )
         );
     }
@@ -314,43 +323,53 @@ mod test {
                 DomHandle::from_raw(vec![0]),
                 0,
                 0,
-                RangeLocationType::Middle
+                0,
+                RangeLocationType::Middle,
+                true,
             )
         );
         assert_eq!(
             find_pos(&d, d.document_handle(), 1, 1),
             found_single_node(
                 DomHandle::from_raw(vec![0]),
+                0,
                 1,
                 1,
-                RangeLocationType::Middle
+                RangeLocationType::Middle,
+                true,
             )
         );
         assert_eq!(
             find_pos(&d, d.document_handle(), 2, 2),
             found_single_node(
                 DomHandle::from_raw(vec![0]),
+                0,
                 2,
                 2,
-                RangeLocationType::Middle
+                RangeLocationType::Middle,
+                true,
             )
         );
         assert_eq!(
             find_pos(&d, d.document_handle(), 3, 3),
             found_single_node(
                 DomHandle::from_raw(vec![0]),
+                0,
                 3,
                 3,
-                RangeLocationType::Middle
+                RangeLocationType::Middle,
+                true,
             )
         );
         assert_eq!(
             find_pos(&d, d.document_handle(), 3, 4),
             found_single_node(
                 DomHandle::from_raw(vec![1]),
+                3,
                 0,
                 1,
-                RangeLocationType::Middle
+                RangeLocationType::Middle,
+                true,
             )
         );
         // TODO: break up this test and name parts!
@@ -358,36 +377,44 @@ mod test {
             find_pos(&d, d.document_handle(), 4, 4),
             found_single_node(
                 DomHandle::from_raw(vec![1]),
+                3,
                 1,
                 1,
-                RangeLocationType::Middle
+                RangeLocationType::Middle,
+                true,
             )
         );
         assert_eq!(
             find_pos(&d, d.document_handle(), 4, 4),
             found_single_node(
                 DomHandle::from_raw(vec![1]),
+                3,
                 1,
                 1,
-                RangeLocationType::Middle
+                RangeLocationType::Middle,
+                true,
             )
         );
         assert_eq!(
             find_pos(&d, d.document_handle(), 5, 5),
             found_single_node(
                 DomHandle::from_raw(vec![1]),
+                3,
                 2,
                 2,
-                RangeLocationType::Middle
+                RangeLocationType::Middle,
+                true,
             )
         );
         assert_eq!(
             find_pos(&d, d.document_handle(), 5, 5),
             found_single_node(
                 DomHandle::from_raw(vec![1]),
+                3,
                 2,
                 2,
-                RangeLocationType::Middle
+                RangeLocationType::Middle,
+                true,
             )
         );
         assert_eq!(
@@ -396,7 +423,9 @@ mod test {
                 DomHandle::from_raw(vec![1]),
                 3,
                 3,
-                RangeLocationType::Middle
+                3,
+                RangeLocationType::Middle,
+                true,
             )
         );
     }

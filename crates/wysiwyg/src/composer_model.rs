@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dom::nodes::{ContainerNode, DomNode, TextNode};
+use crate::dom::nodes::{ContainerNode, ContainerNodeKind, DomNode, TextNode};
 use crate::dom::parser::parse;
 use crate::dom::range::RangeLocationType;
 use crate::dom::{
-    Dom, DomHandle, MultipleNodesRange, Range, SameNodeRange, ToHtml,
+    Dom, DomHandle, DomLocation, MultipleNodesRange, Range, SameNodeRange,
+    ToHtml,
 };
 use crate::{
     ActionResponse, ComposerState, ComposerUpdate, InlineFormatType, Location,
@@ -169,31 +170,6 @@ where
 
     pub fn get_selection(&self) -> (Location, Location) {
         (self.state.start, self.state.end)
-    }
-
-    pub fn format(&mut self, format: InlineFormatType) -> ComposerUpdate<C> {
-        // Store current Dom
-        self.push_state_to_history();
-        let (s, e) = self.safe_selection();
-        let range = self.state.dom.find_range(s, e);
-        match range {
-            Range::SameNode(range) => {
-                self.format_same_node(range, format);
-                // TODO: for now, we replace every time, to check ourselves, but
-                // at least some of the time we should not
-                return self.create_update_replace_all();
-            }
-
-            Range::NoNode => {
-                self.state.dom.append(DomNode::new_formatting(
-                    format.tag().to_html(),
-                    vec![DomNode::Text(TextNode::from("".to_html()))],
-                ));
-                return ComposerUpdate::keep();
-            }
-
-            _ => panic!("Can't format in complex object models yet"),
-        }
     }
 
     pub fn create_ordered_list(&mut self) -> ComposerUpdate<C> {
@@ -386,6 +362,48 @@ where
         }
     }
 
+    fn push_state_to_history(&mut self) {
+        // Clear future events as they're no longer valid
+        self.next_states.clear();
+        // Store a copy of the current state in the previous_states
+        self.previous_states.push(self.state.clone());
+    }
+}
+
+impl<'a> ComposerModel<u16>
+where
+    Dom<u16>: ToHtml<u16>,
+    &'a str: ToHtml<u16>,
+{
+    pub fn format(&mut self, format: InlineFormatType) -> ComposerUpdate<u16> {
+        // Store current Dom
+        self.push_state_to_history();
+        let (s, e) = self.safe_selection();
+        let range = self.state.dom.find_range(s, e);
+        match range {
+            Range::SameNode(range) => {
+                self.format_same_node(range, format);
+                // TODO: for now, we replace every time, to check ourselves, but
+                // at least some of the time we should not
+                return self.create_update_replace_all();
+            }
+
+            Range::NoNode => {
+                self.state.dom.append(DomNode::new_formatting(
+                    format.tag().to_html(),
+                    format,
+                    vec![DomNode::Text(TextNode::from("".to_html()))],
+                ));
+                return ComposerUpdate::keep();
+            }
+            Range::MultipleNodes(locations) => {
+                self.format_several_nodes(&locations, format);
+                return self.create_update_replace_all();
+            }
+            _ => panic!("Can't format in complex object models yet"),
+        }
+    }
+
     fn format_same_node(
         &mut self,
         range: SameNodeRange,
@@ -402,6 +420,7 @@ where
                 DomNode::Text(TextNode::from(before)),
                 DomNode::new_formatting(
                     format.tag().to_html(),
+                    format,
                     vec![DomNode::Text(TextNode::from(during))],
                 ),
                 DomNode::Text(TextNode::from(after)),
@@ -412,19 +431,137 @@ where
         }
     }
 
-    fn push_state_to_history(&mut self) {
-        // Clear future events as they're no longer valid
-        self.next_states.clear();
-        // Store a copy of the current state in the previous_states
-        self.previous_states.push(self.state.clone());
+    fn parents_contain_format_node(
+        &self,
+        handle: DomHandle,
+        format: InlineFormatType,
+    ) -> Option<DomHandle> {
+        if handle.has_parent() {
+            let parent_handle = handle.parent_handle();
+            if let DomNode::Container(n) =
+                self.state.dom.lookup_node(parent_handle)
+            {
+                if let ContainerNodeKind::Formatting(kind) = n.kind() {
+                    if *kind == format {
+                        Some(n.handle())
+                    } else {
+                        self.parents_contain_format_node(n.handle(), format)
+                    }
+                } else {
+                    self.parents_contain_format_node(n.handle(), format)
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
-}
 
-impl<'a> ComposerModel<u16>
-where
-    Dom<u16>: ToHtml<u16>,
-    &'a str: ToHtml<u16>,
-{
+    fn format_several_nodes(
+        &mut self,
+        range: &MultipleNodesRange,
+        format: InlineFormatType,
+    ) {
+        let locations_to_format: Vec<&DomLocation> = range
+            .locations
+            .iter()
+            .filter(|loc| {
+                loc.is_leaf
+                    && self
+                        .parents_contain_format_node(
+                            loc.node_handle.clone(),
+                            format.clone(),
+                        )
+                        .is_none()
+            })
+            .collect();
+        let locations_to_remove_format: Vec<&DomLocation> = range
+            .locations
+            .iter()
+            .filter(|loc| !loc.is_leaf && !locations_to_format.contains(loc))
+            .collect();
+
+        // We need to go backwards to avoid modifying already changed node handles
+        for location in locations_to_format.iter().rev() {
+            self.format_same_node(
+                SameNodeRange {
+                    node_handle: location.node_handle.clone(),
+                    start_offset: location.start_offset,
+                    end_offset: location.end_offset,
+                },
+                format.clone(),
+            );
+            self.remove_empty_text_nodes(location.node_handle.parent_handle());
+            self.merge_formatting_nodes(location.node_handle.parent_handle());
+        }
+
+        for location in locations_to_remove_format.iter().rev() {
+            let parent_handle = location.node_handle.parent_handle();
+            if let DomNode::Container(n) = self
+                .state
+                .dom
+                .lookup_node(location.node_handle.clone())
+                .clone()
+            {
+                let parent_node = if parent_handle.has_parent() {
+                    self.state.dom.lookup_node_mut(parent_handle.clone())
+                } else {
+                    self.state
+                        .dom
+                        .lookup_node_mut(self.state.dom.document_handle())
+                };
+
+                let children = n.children();
+                if let DomNode::Container(parent_node) = parent_node {
+                    parent_node.replace_child(
+                        n.handle().index_in_parent(),
+                        children.clone(),
+                    );
+                } else {
+                    panic!("Parent node must be a Container.");
+                }
+            } else {
+                panic!("This was supposed to be a formatting node.");
+            }
+            self.merge_formatting_nodes(parent_handle);
+        }
+
+        // assert!(!text_nodes.is_empty());
+    }
+
+    fn remove_empty_text_nodes(&mut self, handle: DomHandle) {
+        if let DomNode::Container(parent) =
+            self.state.dom.lookup_node_mut(handle.clone())
+        {
+            let mut indexes_to_remove = Vec::new();
+            let children = parent.children();
+            for child in children.iter().rev() {
+                if let DomNode::Text(n) = child {
+                    if n.data().is_empty() {
+                        indexes_to_remove.push(n.handle().index_in_parent());
+                    }
+                }
+            }
+            for i in indexes_to_remove {
+                parent.remove(i);
+            }
+        }
+    }
+
+    fn merge_formatting_nodes(&mut self, parent_handle: DomHandle) {
+        if let DomNode::Container(parent) =
+            self.state.dom.lookup_node_mut(parent_handle.clone())
+        {
+            let children = parent.children();
+            for i in (0..children.len() - 1).rev() {
+                parent.merge_children(i + 1, i);
+            }
+        } else {
+            panic!("Parent node must be a Container.");
+        }
+    }
+
     pub fn enter(&mut self) -> ComposerUpdate<u16> {
         // Store current Dom
         self.push_state_to_history();
@@ -650,7 +787,7 @@ mod test {
     use super::*;
     use crate::tests::testutils_composer_model::cm;
 
-    use crate::dom::{DomHandle, ToHtml};
+    use crate::dom::ToHtml;
 
     // Most tests for ComposerModel are inside the tests/ modules
 
@@ -712,5 +849,29 @@ mod test {
         assert_eq!(*handles[1].raw(), vec![0, 9, 2, 4, 5]);
         assert_eq!(*handles[2].raw(), vec![0, 9, 2]);
         assert_eq!(handles.len(), 3);
+    }
+
+    #[test]
+    fn formatting_several_nodes_works() {
+        let mut model = cm("{hello <i>wor}|ld</i>");
+        model.format(InlineFormatType::Bold);
+        assert_eq!(
+            model.state.dom.to_string(),
+            "<b>hello </b><i><strong>wor</b>ld</i>"
+        );
+    }
+
+    #[test]
+    fn extending_formatting_to_several_nodes_works() {
+        let mut model = cm("{hello <b>wor}|ld</b>");
+        model.format(InlineFormatType::Bold);
+        assert_eq!(model.state.dom.to_string(), "<b>hello world</b>");
+    }
+
+    #[test]
+    fn un_formatting_several_nodes_works() {
+        let mut model = cm("{<b>hello world</b>}|");
+        model.format(InlineFormatType::Bold);
+        assert_eq!(model.state.dom.to_string(), "hello world");
     }
 }

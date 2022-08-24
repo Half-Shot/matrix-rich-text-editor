@@ -16,6 +16,7 @@ use crate::dom::dom_handle::DomHandle;
 use crate::dom::html_formatter::HtmlFormatter;
 use crate::dom::nodes::dom_node::DomNode;
 use crate::dom::to_html::{fmt_node_u16, ToHtml};
+use crate::InlineFormatType;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContainerNode<C>
@@ -31,8 +32,8 @@ where
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ContainerNodeKind<C: Clone> {
-    Generic,            // E.g. the root node (the containing div)
-    Formatting(Vec<C>), // TODO: the format parameter is a copy of name
+    Generic,                      // E.g. the root node (the containing div)
+    Formatting(InlineFormatType), // TODO: the format parameter is a copy of name
     Link(Vec<C>),
     List(Vec<C>),
     ListItem(),
@@ -56,16 +57,6 @@ where
             name,
             kind,
             attrs,
-            children,
-            handle: DomHandle::new_unset(),
-        }
-    }
-
-    pub fn new_formatting(format: Vec<C>, children: Vec<DomNode<C>>) -> Self {
-        Self {
-            name: format.clone(),
-            kind: ContainerNodeKind::Formatting(format),
-            attrs: None,
             children,
             handle: DomHandle::new_unset(),
         }
@@ -154,6 +145,10 @@ where
         &self.children
     }
 
+    pub fn kind(&self) -> &ContainerNodeKind<C> {
+        &self.kind
+    }
+
     pub fn children_mut(&mut self) -> &mut Vec<DomNode<C>> {
         // TODO: replace with soemthing like get_child_mut - we want to avoid
         // anyone pushing onto this, because the handles will be unset
@@ -170,9 +165,67 @@ where
     pub fn text_len(&self) -> usize {
         self.children.iter().map(|child| child.text_len()).sum()
     }
+
+    pub fn is_same_kind(&self, other: &ContainerNode<C>) -> bool {
+        match (&self.kind, &other.kind) {
+            (ContainerNodeKind::Generic, ContainerNodeKind::Generic) => true,
+            (ContainerNodeKind::Link(_), ContainerNodeKind::Link(_)) => true,
+            // Maybe this should be re-checked
+            (
+                ContainerNodeKind::Formatting(a),
+                ContainerNodeKind::Formatting(b),
+            ) => a == b,
+            // TODO: Should be re-done to distinguish ul and ol
+            (ContainerNodeKind::List(_), ContainerNodeKind::Link(_)) => true,
+            (ContainerNodeKind::ListItem(), ContainerNodeKind::ListItem()) => {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn merge_children(&mut self, from_index: usize, into_index: usize) {
+        assert!(into_index < self.children.len());
+        assert!(from_index < self.children.len());
+        let from_node = self.children.get(from_index).unwrap().clone();
+        let into_node = self.children.get_mut(into_index).unwrap();
+        match (into_node, from_node) {
+            (DomNode::Container(into_node), DomNode::Container(from_node)) => {
+                if !into_node.is_same_kind(&from_node) {
+                    return;
+                }
+                for c in from_node.children() {
+                    into_node.append(c.clone());
+                }
+                self.remove(from_index);
+            }
+            (DomNode::Text(into_node), DomNode::Text(from_node)) => {
+                let mut new_data = into_node.data().clone().to_vec();
+                let from_data = from_node.data().to_vec().clone();
+                new_data.extend(from_data);
+                into_node.set_data(new_data);
+                self.remove(from_index);
+            }
+            _ => {}
+        };
+    }
 }
 
 impl ContainerNode<u16> {
+    pub fn new_formatting(
+        tag: Vec<u16>,
+        format: InlineFormatType,
+        children: Vec<DomNode<u16>>,
+    ) -> Self {
+        Self {
+            name: tag,
+            kind: ContainerNodeKind::Formatting(format),
+            attrs: None,
+            children,
+            handle: DomHandle::new_unset(),
+        }
+    }
+
     pub fn new_link(url: Vec<u16>, children: Vec<DomNode<u16>>) -> Self {
         Self {
             name: "a".encode_utf16().collect(),

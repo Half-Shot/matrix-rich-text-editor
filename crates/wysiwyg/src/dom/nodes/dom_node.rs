@@ -17,6 +17,7 @@ use crate::dom::html_formatter::HtmlFormatter;
 use crate::dom::nodes::container_node::ContainerNode;
 use crate::dom::nodes::text_node::TextNode;
 use crate::dom::to_html::ToHtml;
+use crate::InlineFormatType;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DomNode<C>
@@ -31,13 +32,6 @@ impl<C> DomNode<C>
 where
     C: Clone,
 {
-    pub fn new_formatting(
-        format: Vec<C>,
-        children: Vec<DomNode<C>>,
-    ) -> DomNode<C> {
-        DomNode::Container(ContainerNode::new_formatting(format, children))
-    }
-
     pub fn new_list(
         list_type: Vec<C>,
         children: Vec<DomNode<C>>,
@@ -75,6 +69,14 @@ where
 }
 
 impl DomNode<u16> {
+    pub fn new_formatting(
+        tag: Vec<u16>,
+        format: InlineFormatType,
+        children: Vec<DomNode<u16>>,
+    ) -> DomNode<u16> {
+        DomNode::Container(ContainerNode::new_formatting(tag, format, children))
+    }
+
     pub fn new_link(
         url: Vec<u16>,
         children: Vec<DomNode<u16>>,
