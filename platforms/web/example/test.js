@@ -12,103 +12,104 @@ const editor = document.getElementById('editor');
 
 run_tests([
     { name: "ASCII characters have width 1", test: () => {
-        editor.innerHTML = "abcd";
+        set_editor_html("abcd");
         deleteRange(0, 1);
-        assert_eq(editor.innerHTML, "bcd");
+        assert_editor_contains("bcd");
 
-        editor.innerHTML = "abcd";
+        set_editor_html("abcd");
         deleteRange(0, 2);
-        assert_eq(editor.innerHTML, "cd");
+        assert_editor_contains("cd");
     }},
 
     { name: "UCS-2 characters have width 1", test: () => {
-        editor.innerHTML = "\u{03A9}bcd";
+        set_editor_html("\u{03A9}bcd");
         deleteRange(0, 1);
-        assert_eq(editor.innerHTML, "bcd");
+        assert_editor_contains("bcd");
 
-        editor.innerHTML = "\u{03A9}bcd";
+        set_editor_html("\u{03A9}bcd");
         deleteRange(0, 2);
-        assert_eq(editor.innerHTML, "cd");
+        assert_editor_contains("cd");
     }},
 
     { name: "Multi-code unit UTF-16 characters have width 2", test: () => {
-        editor.innerHTML = "\u{1F4A9}bcd";
+        set_editor_html("\u{1F4A9}bcd");
         deleteRange(0, 2);
-        assert_eq(editor.innerHTML, "bcd");
+        assert_editor_contains("bcd");
 
-        editor.innerHTML = "\u{1F4A9}bcd";
+        set_editor_html("\u{1F4A9}bcd");
         deleteRange(0, 3);
-        assert_eq(editor.innerHTML, "cd");
+        assert_editor_contains("cd");
     }},
 
     { name: "Complex characters width = num UTF-16 code units", test: () => {
-        editor.innerHTML = "\u{1F469}\u{1F3FF}\u{200D}\u{1F680}bcd";
+        set_editor_html("\u{1F469}\u{1F3FF}\u{200D}\u{1F680}bcd");
         deleteRange(0, 7);
-        assert_eq(editor.innerHTML, "bcd");
+        assert_editor_contains("bcd");
 
-        editor.innerHTML = "\u{1F469}\u{1F3FF}\u{200D}\u{1F680}bcd";
+        set_editor_html("\u{1F469}\u{1F3FF}\u{200D}\u{1F680}bcd");
         deleteRange(0, 8);
-        assert_eq(editor.innerHTML, "cd");
+        assert_editor_contains("cd");
     }},
 
     { name: "node_and_offset finds at the start of simple text", test: () => {
-        editor.innerHTML = "abcdefgh";
+        set_editor_html("abcdefgh");
         let { node, offset } = node_and_offset(editor, 0);
         assert_same(node, editor.childNodes[0]);
         assert_eq(offset, 0);
     }},
 
     { name: "node_and_offset finds in the middle of simple text", test: () => {
-        editor.innerHTML = "abcdefgh";
+        set_editor_html("abcdefgh");
         let { node, offset } = node_and_offset(editor, 4);
         assert_same(node, editor.childNodes[0]);
         assert_eq(offset, 4);
     }},
 
     { name: "node_and_offset finds at the end of simple text", test: () => {
-        editor.innerHTML = "abcdefgh";
+        set_editor_html("abcdefgh");
         let { node, offset } = node_and_offset(editor, 8);
         assert_same(node, editor.childNodes[0]);
         assert_eq(offset, 8);
     }},
 
     { name: "node_and_offset returns null if off the end", test: () => {
-        editor.innerHTML = "abcdefgh";
-        let { node, offset } = node_and_offset(editor, 9);
+        set_editor_html("abcdefgh");
+        // 8 characters, plus the br we always append = 9, so 10 is off end
+        let { node, offset } = node_and_offset(editor, 10);
         assert_same(node, null);
         assert_eq(offset, 1);
     }},
 
     { name: "node_and_offset finds before subnode", test: () => {
-        editor.innerHTML = "abc<b>def</b>gh";
+        set_editor_html("abc<b>def</b>gh");
         let { node, offset } = node_and_offset(editor, 2);
         assert_same(node, editor.childNodes[0]);
         assert_eq(offset, 2);
     }},
 
     { name: "node_and_offset finds inside subnode", test: () => {
-        editor.innerHTML = "abc<b>def</b>gh";
+        set_editor_html("abc<b>def</b>gh");
         let { node, offset } = node_and_offset(editor, 4);
         assert_same(node, editor.childNodes[1].childNodes[0]);
         assert_eq(offset, 1);
     }},
 
     { name: "node_and_offset finds after subnode", test: () => {
-        editor.innerHTML = "abc<b>def</b>gh";
+        set_editor_html("abc<b>def</b>gh");
         let { node, offset } = node_and_offset(editor, 7);
         assert_same(node, editor.childNodes[2]);
         assert_eq(offset, 1);
     }},
 
     { name: "node_and_offset finds before br", test: () => {
-        editor.innerHTML = "a<br />b";
+        set_editor_html("a<br />b");
         let { node, offset } = node_and_offset(editor, 0);
         assert_same(node, editor.childNodes[0]);
         assert_eq(offset, 0);
     }},
 
     { name: "node_and_offset finds br start", test: () => {
-        editor.innerHTML = "a<br />b";
+        set_editor_html("a<br />b");
         let { node, offset } = node_and_offset(editor, 1);
         assert_same(node, editor.childNodes[0]);
         assert_eq(offset, 1);
@@ -118,7 +119,7 @@ run_tests([
         // We never actually return the br as the node that
         // was selected, unless there are two in a row.
 
-        editor.innerHTML = "a<br />b";
+        set_editor_html("a<br />b");
         let { node, offset } = node_and_offset(editor, 2);
         assert_same(node, editor.childNodes[2]);
         assert_eq(offset, 0);
@@ -126,42 +127,42 @@ run_tests([
 
     { name: "node_and_offset finds between brs", test: () => {
         // Selection falls between the two brs
-        editor.innerHTML = "a<br /><br />b";
+        set_editor_html("a<br /><br />b");
         let { node, offset } = node_and_offset(editor, 2);
         assert_same(node, editor.childNodes[2]);
         assert_eq(offset, 0);
     }},
 
     { name: "node_and_offset finds after br", test: () => {
-        editor.innerHTML = "a<br />b";
+        set_editor_html("a<br />b");
         let { node, offset } = node_and_offset(editor, 3);
         assert_same(node, editor.childNodes[2]);
         assert_eq(offset, 1);
     }},
 
     { name: "node_and_offset finds inside an empty list", test: () => {
-        editor.innerHTML = "<ul><li><li></ul>";
+        set_editor_html("<ul><li><li></ul>");
         let { node, offset } = node_and_offset(editor, 0);
         assert_same(node, editor.childNodes[0].childNodes[0]);
         assert_eq(offset, 0);
     }},
 
     { name: "node_and_offset finds inside two  empty list", test: () => {
-        editor.innerHTML = "<ul><li><li></ul><li><li></ul>";
+        set_editor_html("<ul><li><li></ul><li><li></ul>");
         let { node, offset } = node_and_offset(editor, 0);
         assert_same(node, editor.childNodes[0].childNodes[0]);
         assert_eq(offset, 0);
     }},
 
     { name: "node_and_offset finds inside a list", test: () => {
-        editor.innerHTML = "<ul><li>foo<li></ul>";
+        set_editor_html("<ul><li>foo<li></ul>");
         let { node, offset } = node_and_offset(editor, 1);
         assert_same(node, editor.childNodes[0].childNodes[0].childNodes[0]);
         assert_eq(offset, 1);
     }},
 
     { name: "codeunit_count ASCII", test: () => {
-        editor.innerHTML = "abcdefgh";
+        set_editor_html("abcdefgh");
         let textNode = editor.childNodes[0];
         assert_eq(codeunit_count(editor, textNode, 0), 0);
         assert_eq(codeunit_count(editor, textNode, 3), 3);
@@ -173,7 +174,7 @@ run_tests([
     }},
 
     { name: "codeunit_count UCS-2", test: () => {
-        editor.innerHTML = "a\u{03A9}b\u{03A9}c";
+        set_editor_html("a\u{03A9}b\u{03A9}c");
         let textNode = editor.childNodes[0];
         assert_eq(codeunit_count(editor, textNode, 0), 0);
         assert_eq(codeunit_count(editor, textNode, 1), 1);
@@ -183,7 +184,7 @@ run_tests([
     }},
 
     { name: "codeunit_count complex", test: () => {
-        editor.innerHTML = "a\u{1F469}\u{1F3FF}\u{200D}\u{1F680}b";
+        set_editor_html("a\u{1F469}\u{1F3FF}\u{200D}\u{1F680}b");
         let textNode = editor.childNodes[0];
         assert_eq(codeunit_count(editor, textNode, 0), 0);
         assert_eq(codeunit_count(editor, textNode, 7), 7);
@@ -193,7 +194,7 @@ run_tests([
     }},
 
     { name: "codeunit_count nested", test: () => {
-        editor.innerHTML = "a<b>b</b>c";
+        set_editor_html("a<b>b</b>c");
         let firstTextNode = editor.childNodes[0];
         let boldTextNode = editor.childNodes[1].childNodes[0];
         let thirdTextNode = editor.childNodes[2];
@@ -203,7 +204,7 @@ run_tests([
     }},
 
     { name: "codeunit_count treats br as a character", test: () => {
-        editor.innerHTML = "a<br />b";
+        set_editor_html("a<br />b");
         let firstTextNode = editor.childNodes[0];
         let brNode = editor.childNodes[1];
         let secondTextNode = editor.childNodes[2];
@@ -214,7 +215,7 @@ run_tests([
     }},
 
     { name: "codeunit_count deeply nested", test: () => {
-        editor.innerHTML = "aaa<b><i>bbb</i>ccc</b>ddd";
+        set_editor_html("aaa<b><i>bbb</i>ccc</b>ddd");
         let firstTextNode = editor.childNodes[0];
         let boldItalicNode = editor.childNodes[1].childNodes[0];
         let boldItalicTextNode = editor.childNodes[1].childNodes[0].childNodes[0];
@@ -240,7 +241,7 @@ run_tests([
 
     { name: "The offset should contain all the characters when the editor node is selected", test: () => {
         // When
-        editor.innerHTML = "abc<b>def</b>gh";
+        set_editor_html("abc<b>def</b>gh");
         // Use the editor node and a offset as 1 to simulate the FF behavior
         let offset = computeSelectionOffset(editor, 1);
 
@@ -248,7 +249,7 @@ run_tests([
         assert_eq(offset, 8);
 
          // When
-        editor.innerHTML = "abc<b>def</b>gh<ul><li>alice</li><li>bob</li>";
+        set_editor_html("abc<b>def</b>gh<ul><li>alice</li><li>bob</li>");
         offset = computeSelectionOffset(editor, 1);
 
          // Then
@@ -257,7 +258,7 @@ run_tests([
 
     { name: "The offset should contain the selected characters", test: () => {
         // When
-        editor.innerHTML = "abc<b>def</b>gh<ul><li>alice</li><li>bob</li>";
+        set_editor_html("abc<b>def</b>gh<ul><li>alice</li><li>bob</li>");
         let offset = computeSelectionOffset(editor.childNodes[0], 1);
 
         // Then
@@ -272,7 +273,7 @@ run_tests([
 
     { name: "Selecting back to the beginning of the line works", test: () => {
         // When
-        editor.innerHTML = "abc";
+        set_editor_html("abc");
         let offset = computeSelectionOffset(editor.childNodes[0], 0);
 
         // Then
@@ -613,4 +614,13 @@ function throw_error(msg) {
     document.body.appendChild(div);
 
     throw new Error(msg);
+}
+
+function set_editor_html(html) {
+    // The editor always needs an extra BR after your HTML
+    editor.innerHTML = html + "<br />";
+}
+
+function assert_editor_contains(html) {
+    assert_eq(editor.innerHTML, html + "<br>");
 }
