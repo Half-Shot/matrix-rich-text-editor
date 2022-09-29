@@ -242,14 +242,19 @@ function sendFormatBlockEvent(e, blockType) {
 }
 
 function get_current_selection() {
+    return get_selection_in_editor(editor);
+}
+
+function get_selection_in_editor(editor) {
     const s = document.getSelection();
+
     // We should check that the selection is happening within the editor!
     // If anchor or focus are outside editor but not both, we should
     // change the selection, cutting off at the edge.
     // This should be done when we convert to React
     // Internal task for changing to React: PSU-721
     const start = codeunit_count(editor, s.anchorNode, s.anchorOffset);
-    const end = codeunit_count(editor, s.focusNode, computeSelectionOffset(s.focusNode, s.focusOffset));
+    const end = codeunit_count(editor, s.focusNode, s.focusOffset);
 
     return [start, end];
 }
@@ -304,6 +309,25 @@ function selectionchange() {
     action(composer_model.select(start, end), "select", start, end);
 }
 
+function text_length(node, stop_at_node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+        return node.textContent.length;
+    } else if (node.nodeName === "BR") {
+        // Treat br tags as being 1 character long
+        return 1;
+    } else {
+        // Add up lengths until we hit the stop node.
+        let sum = 0;
+        for (const ch of node.childNodes) {
+            if (ch === stop_at_node) {
+                break;
+            }
+            sum += text_length(ch, stop_at_node);
+        }
+        return sum;
+    }
+}
+
 /**
  * Given a position in the document, count how many codeunits through the
  * editor that position is, by counting from the beginning of the editor,
@@ -318,17 +342,28 @@ function codeunit_count(editor, node, offset) {
     function impl(current_node, offset) {
         if (current_node === node) {
             // We've found the right node
-            if (
-                current_node.nodeType === Node.TEXT_NODE
-                && offset > current_node.textContent.length
-            ) {
-                // If the offset is wrong, we didn't find it
-                return { found: false, offset: 0 };
+            if ( current_node.nodeType === Node.TEXT_NODE) {
+                // Text node - use the offset to know where we are
+                if (offset > current_node.textContent.length) {
+                    // If the offset is wrong, we didn't find it
+                    return { found: false, offset: 0 };
+                } else {
+                    // Otherwise, we did
+                    return { found: true, offset };
+                }
             } else {
-                // Otherwise, we did
-                return { found: true, offset };
+                // Non-text node - offset is the index of the selected node
+                // within current_node.
+                // Add up the sizes of all the nodes before offset.
+                const ret = text_length(
+                    current_node,
+                    current_node.childNodes[offset]
+                );
+                return { found: true, offset: ret };
             }
         } else {
+            // TODO: the below looks awfully similar to text_length!
+
             // We have not found the right node yet
             if (current_node.nodeType === Node.TEXT_NODE) {
                 // Return how many steps forward we progress by skipping
@@ -495,13 +530,6 @@ function add_selection(text, start, end) {
 }
 
 function update_testcase(update) {
-    let html = editor.innerHTML;
-    if (update) {
-        // TODO: if (replacement_html !== html) SHOW AN ERROR?
-        // TODO: handle other types of update (not just replace_all)
-        html = update.text_update().replace_all?.replacement_html;
-    }
-
     testcase.innerText = generate_testcase(
         actions, composer_model.to_example_format()
     );
@@ -627,9 +655,10 @@ function process_input(e) {
 }
 
 export {
-    wysiwyg_run,
     codeunit_count,
-    node_and_offset,
     generate_testcase,
-    selection_according_to_actions
+    get_selection_in_editor,
+    node_and_offset,
+    selection_according_to_actions,
+    wysiwyg_run
 };

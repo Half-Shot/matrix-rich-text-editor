@@ -1,8 +1,9 @@
 import init from "./generated/wysiwyg.js";
 import {
     codeunit_count,
-    node_and_offset,
     generate_testcase,
+    get_selection_in_editor,
+    node_and_offset,
     selection_according_to_actions
 } from "./wysiwyg.js";
 
@@ -209,31 +210,26 @@ run_tests([
         let brNode = editor.childNodes[1];
         let secondTextNode = editor.childNodes[2];
         assert_eq(codeunit_count(editor, firstTextNode, 0), 0);
-        assert_eq(codeunit_count(editor, brNode, 0), 1);
-        assert_eq(codeunit_count(editor, brNode, 1), 2);
+        assert_eq(codeunit_count(editor, brNode, 0), 2);
         assert_eq(codeunit_count(editor, secondTextNode, 1), 3);
     }},
 
     { name: "codeunit_count deeply nested", test: () => {
         set_editor_html("aaa<b><i>bbb</i>ccc</b>ddd");
         let firstTextNode = editor.childNodes[0];
-        let boldItalicNode = editor.childNodes[1].childNodes[0];
         let boldItalicTextNode = editor.childNodes[1].childNodes[0].childNodes[0];
-        let boldOnlyNode = editor.childNodes[1].childNodes[1];
+        let boldOnlyTextNode = editor.childNodes[1].childNodes[1];
         let thirdTextNode = editor.childNodes[2];
         assert_eq(codeunit_count(editor, firstTextNode, 1), 1);
         assert_eq(codeunit_count(editor, firstTextNode, 2), 2);
         assert_eq(codeunit_count(editor, firstTextNode, 3), 3);
-        assert_eq(codeunit_count(editor, boldItalicNode, 0), 3);
-        assert_eq(codeunit_count(editor, boldItalicNode, 1), 4);
-        assert_eq(codeunit_count(editor, boldItalicNode, 2), 5);
         // We can supply the text node or its parent
         assert_eq(codeunit_count(editor, boldItalicTextNode, 0), 3);
         assert_eq(codeunit_count(editor, boldItalicTextNode, 1), 4);
         assert_eq(codeunit_count(editor, boldItalicTextNode, 2), 5);
-        assert_eq(codeunit_count(editor, boldOnlyNode, 0), 6);
-        assert_eq(codeunit_count(editor, boldOnlyNode, 1), 7);
-        assert_eq(codeunit_count(editor, boldOnlyNode, 2), 8);
+        assert_eq(codeunit_count(editor, boldOnlyTextNode, 0), 6);
+        assert_eq(codeunit_count(editor, boldOnlyTextNode, 1), 7);
+        assert_eq(codeunit_count(editor, boldOnlyTextNode, 2), 8);
         assert_eq(codeunit_count(editor, thirdTextNode, 0), 9);
         assert_eq(codeunit_count(editor, thirdTextNode, 1), 10);
         assert_eq(codeunit_count(editor, thirdTextNode, 2), 11);
@@ -294,6 +290,107 @@ run_tests([
             ["foo", "bar", "baz"],
         ];
         assert_eq([12, 13], selection_according_to_actions(actions));
+    }},
+
+    { name: "Getting selection cursor after BR", test: () => {
+        // Place the cursor on the empty line
+        set_editor_html("para 1<br /><br />para 2");
+        const secondbr = document.querySelector("#editor br").nextSibling;
+        cursor_to_node(secondbr, 0);
+        const sel = document.getSelection();
+
+        // The focusNode and anchorNode are the editor object, not one of the
+        // text nodes inside it, and the offset tells you which node inside
+        // editor is immediately after the cursor.
+        assert_same(sel.anchorNode, editor);
+        assert_eq(sel.anchorOffset, 2);
+        assert_same(sel.focusNode, editor);
+        assert_eq(sel.focusOffset, 2);
+
+        // We should see ourselves as on code unit 7, because the BR
+        // counts as 1.
+        assert_eq(
+            [7, 7],
+            get_selection_in_editor(editor)
+        );
+    }},
+
+    { name: "Getting backward selection ending after BR", test: () => {
+        set_editor_html("para 1<br /><br />para 2");
+        const secondbr = document.querySelector("#editor br").nextSibling;
+        select_end_to(secondbr, 0);
+        const sel = document.getSelection();
+
+        // The focusNode and anchorNode are the editor object, not one of the
+        // text nodes inside it, and the offset tells you which node inside
+        // editor is immediately after the cursor.
+        assert_same(sel.anchorNode, editor.childNodes[3]);
+        assert_eq(sel.anchorOffset, 6);
+        assert_same(sel.focusNode, editor);
+        assert_eq(sel.focusOffset, 2);
+
+        // Selection backwards from the end to the blank line
+        assert_eq(
+            [14, 7],
+            get_selection_in_editor(editor)
+        );
+    }},
+
+    { name: "Select all with ctrl-a", test: () => {
+        set_editor_html("para 1<br /><br />para 2");
+        select_all();
+        assert_eq(
+            [0, 15], // Not 14 here because the last BR gets counted?
+            get_selection_in_editor(editor)
+        );
+    }},
+
+    { name: "Select all by dragging", test: () => {
+        set_editor_html("para 1<br /><br />para 2");
+        select_start_to_end();
+        assert_eq(
+            [0, 14],
+            get_selection_in_editor(editor)
+        );
+    }},
+
+    { name: "Select all by dragging backwards", test: () => {
+        set_editor_html("para 1<br /><br />para 2");
+        select_end_to_start();
+        assert_eq(
+            [14, 0],
+            get_selection_in_editor(editor)
+        );
+    }},
+
+    { name: "Select across multiple newlines", test: () => {
+        set_editor_html("para 1<br /><br />para 2");
+        const p1 = editor.childNodes[0];
+        const p2 = editor.childNodes[3];
+        select(p1, 2, p2, 3);
+        assert_eq(
+            [2, 11],
+            get_selection_in_editor(editor)
+        );
+    }},
+
+    { name: "Selection after pressing down at end", test: () => {
+        set_editor_html("para 1<br /><br />para 2");
+        // Simulate going to end of doc and pressing down arrow
+        cursor_to_after_end();
+        assert_eq(
+            [14, 14],
+            get_selection_in_editor(editor)
+        );
+    }},
+
+    { name: "Selection at beginning", test: () => {
+        set_editor_html("para 1<br /><br />para 2");
+        cursor_to_beginning();
+        assert_eq(
+            [0, 0],
+            get_selection_in_editor(editor)
+        );
     }},
 
     { name: "Generate testcase from 1 character and selection", test: () => {
@@ -623,4 +720,120 @@ function set_editor_html(html) {
 
 function assert_editor_contains(html) {
     assert_eq(editor.innerHTML, html + "<br>");
+}
+
+function last_text_node() {
+    for (let i = editor.childNodes.length - 1; i >= 0; i--) {
+        const n = editor.childNodes[i];
+        if (n.nodeType === Node.TEXT_NODE && n.textContent !== "\n") {
+            return n;
+        }
+    }
+    return null;
+}
+
+function index_of(child, parent) {
+    let i = 0;
+    for (let ch of parent.childNodes) {
+        if (ch.isSameNode(child)) {
+            return i;
+        }
+        i++;
+    }
+    return -1;
+}
+
+/** Like clicking at the beginning */
+function cursor_to_beginning() {
+    const sel = document.getSelection();
+    sel.selectAllChildren(editor.firstChild);
+    sel.collapseToStart();
+}
+
+/** Click at the end then press down arrow */
+function cursor_to_after_end() {
+    const offset = editor.childNodes.length - 1;
+    const sel = document.getSelection();
+    sel.setBaseAndExtent(editor, offset, editor, offset);
+}
+
+/** Click at the end */
+function cursor_to_end() {
+    const lastTextNode = last_text_node();
+    const len = lastTextNode.textContent.length;
+    const sel = document.getSelection();
+    sel.setBaseAndExtent(lastTextNode, len, lastTextNode, len);
+}
+
+/** Moves to the supplied node at the supplied offset. Ignores the offset
+ * if you supply a non-text node, and places you immediately BEFORE the
+ * supplied node. */
+function cursor_to_node(node, offset) {
+    if (node.nodeType === Node.TEXT_NODE) {
+        // Text node - refer to it, with index at end
+        const sel = document.getSelection();
+        sel.setBaseAndExtent(node, offset, node, offset);
+    } else {
+        // Find parent and point to this node within the parent
+        const parent = node.parentNode;
+        const idx = index_of(node, parent);
+        const sel = document.getSelection();
+        sel.setBaseAndExtent(parent, idx, parent, idx);
+    }
+}
+
+function select_all() {
+    const sel = document.getSelection();
+    sel.selectAllChildren(editor);
+}
+
+function select_start_to_end() {
+    const lastTextNode = last_text_node();
+
+    const sel = document.getSelection();
+    sel.setBaseAndExtent(
+        editor.firstChild,
+        0,
+        lastTextNode,
+        lastTextNode.textContent.length
+    );
+}
+
+function select_end_to_start() {
+    cursor_to_end();
+    document.getSelection().extend(editor.firstChild);
+}
+
+function select(node1, offset1, node2, offset2) {
+    cursor_to_node(node1, offset1);
+
+    let n2;
+    let o2;
+    if (node2.nodeType === Node.TEXT_NODE) {
+        o2 = offset2;
+        n2 = node2;
+    } else {
+        o2 = index_of(node2, node2.parentNode);
+        n2 = node2.parentNode;
+    }
+
+    document.getSelection().extend(n2, o2);
+}
+
+/** Select from the end to the supplied node. If node is not a text node,
+ * offset is ignored, and the selection starts BEFORE node. */
+function select_end_to(node, offset) {
+    cursor_to_end();
+
+    let n;
+    let o;
+    if (node.nodeType === Node.TEXT_NODE) {
+        o = offset;
+        n = node;
+    } else {
+        o = index_of(node, node.parentNode);
+        n = node.parentNode;
+    }
+
+    document.getSelection().extend(n, o);
 }
