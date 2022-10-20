@@ -25,12 +25,15 @@ extension UITextView {
     /// - Parameters:
     ///   - content: Content to apply.
     func apply(_ content: WysiwygComposerContent) {
-        performWithoutDelegate {
-            self.attributedText = content.attributed
-            // Set selection to {0, 0} then to expected position
-            // avoids an issue with autocapitalization.
-            self.selectedRange = .zero
-            self.selectedRange = content.attributedSelection
+        // Avoid conflicting removals of the delegate
+        DispatchQueue.main.async {
+            self.performWithoutDelegate {
+                self.attributedText = content.attributed
+                // Set selection to {0, 0} then to expected position
+                // avoids an issue with autocapitalization.
+                self.selectedRange = .zero
+                self.selectedRange = content.attributedSelection
+            }
         }
     }
 }
