@@ -164,8 +164,7 @@ class EditorEditText : TextInputEditText {
 
     private fun setTextInternal(text: CharSequence?) {
         beginBatchEdit()
-        editableText.clear()
-        editableText.replace(0, editableText.length, text)
+        editableText.replace(0, editableText.length, text, 0, text?.length ?: 0)
         endBatchEdit()
     }
 

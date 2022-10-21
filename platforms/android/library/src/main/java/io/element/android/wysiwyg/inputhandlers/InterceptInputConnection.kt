@@ -272,7 +272,7 @@ internal class InterceptInputConnection(
     ) {
         beginBatchEdit()
         editable.clear()
-        editable.replace(0, editable.length, charSequence)
+        editable.replace(0, editable.length, charSequence, 0, charSequence.length)
         setComposingRegion(compositionStart, compositionEnd)
         endBatchEdit()
     }
