@@ -43,7 +43,7 @@ internal class EditorViewModel(
             when (action) {
                 is EditorInputAction.ReplaceText -> {
                     // This conversion to a plain String might be too simple
-                    composer?.replaceText(action.value.toString())
+                    composer?.replaceTextIn(action.value.toString(), action.start.toUInt(), action.end.toUInt())
                 }
                 is EditorInputAction.InsertParagraph -> {
                     composer?.enter()

@@ -16,7 +16,7 @@ class OrderedListSpan(
     textSize: Float,
     val order: Int,
     private val gapWidth: Int,
-) : LeadingMarginSpan {
+) : LeadingMarginSpan, RichTextSpan {
 
     private val prefix = "$order."
     private val prefixToMeasure = "99."

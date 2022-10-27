@@ -17,6 +17,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.lifecycle.*
 import com.google.android.material.textfield.TextInputEditText
+import io.element.android.wysiwyg.extensions.clearRichTextSpans
 import io.element.android.wysiwyg.inputhandlers.InterceptInputConnection
 import io.element.android.wysiwyg.inputhandlers.models.EditorInputAction
 import io.element.android.wysiwyg.inputhandlers.models.InlineFormat
@@ -140,9 +141,13 @@ class EditorEditText : TextInputEditText {
                 return false
             }
             android.R.id.paste, android.R.id.pasteAsPlainText -> {
+                val start = selectionStart
+                val end = selectionEnd
                 val clipBoardManager = context.getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
                 val copiedString = clipBoardManager.primaryClip?.getItemAt(0)?.text ?: return false
-                val update = viewModel.processInput(EditorInputAction.ReplaceText(copiedString))
+                val (cStart, cEnd) = EditorIndexMapper.fromEditorToComposer(start, end, editableText)
+                    ?: return false
+                val update = viewModel.processInput(EditorInputAction.ReplaceText(copiedString, cStart, cEnd))
                 val result = update?.let { viewModel.processUpdate(it) }
 
                 if (result != null) {
@@ -190,8 +195,9 @@ class EditorEditText : TextInputEditText {
         if (!this.isInitialized) {
             super.setText(text, type)
         } else {
-            viewModel.updateSelection(editableText, 0, end)
-            val update = viewModel.processInput(EditorInputAction.ReplaceText(text.toString()))
+            val (cStart, cEnd) = EditorIndexMapper.fromEditorToComposer(0, end, editableText)
+                ?: return
+            val update = viewModel.processInput(EditorInputAction.ReplaceText(text.toString(), cStart, cEnd))
             val result = update?.let { viewModel.processUpdate(it) }
 
             if (result != null) {
@@ -205,13 +211,15 @@ class EditorEditText : TextInputEditText {
 
     private fun setTextInternal(text: CharSequence?) {
         beginBatchEdit()
-        editableText.clear()
+        editableText.clearRichTextSpans()
         editableText.replace(0, editableText.length, text)
         endBatchEdit()
     }
 
     override fun append(text: CharSequence?, start: Int, end: Int) {
-        val update = viewModel.processInput(EditorInputAction.ReplaceText(text.toString()))
+        val (cStart, cEnd) = EditorIndexMapper.fromEditorToComposer(start, end, editableText)
+            ?: return
+        val update = viewModel.processInput(EditorInputAction.ReplaceText(text.toString(), cStart, cEnd))
         val result = update?.let { viewModel.processUpdate(it) }
 
         if (result != null) {

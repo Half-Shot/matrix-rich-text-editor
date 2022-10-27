@@ -14,7 +14,7 @@ import androidx.core.content.ContextCompat
  * Inline code (`some code` in Markdown, <code> in HTML) Span that applies a monospaced font style
  * and adds a background color.
  */
-class InlineCodeSpan : MetricAffectingSpan, UpdateAppearance, ParcelableSpan {
+class InlineCodeSpan : MetricAffectingSpan, UpdateAppearance, ParcelableSpan, RichTextSpan {
 
     private val monoTypefaceSpan: TypefaceSpan
     private val backgroundColorSpan: BackgroundColorSpan

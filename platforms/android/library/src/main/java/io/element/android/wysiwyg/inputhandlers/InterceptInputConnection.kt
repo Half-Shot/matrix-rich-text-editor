@@ -11,7 +11,10 @@ import android.view.inputmethod.*
 import android.widget.TextView
 import androidx.annotation.RequiresApi
 import androidx.annotation.VisibleForTesting
+import androidx.core.text.getSpans
+import io.element.android.wysiwyg.extensions.clearRichTextSpans
 import io.element.android.wysiwyg.inputhandlers.models.EditorInputAction
+import io.element.android.wysiwyg.spans.RichTextSpan
 import io.element.android.wysiwyg.utils.EditorIndexMapper
 import io.element.android.wysiwyg.viewmodel.EditorViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -123,9 +126,11 @@ internal class InterceptInputConnection(
     // Called when started typing
     override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
         val (start, end) = getCurrentCompositionOrSelection()
-        viewModel.updateSelection(editable, start, end)
         val result = withProcessor {
-            processInput(EditorInputAction.ReplaceText(text.toString()))?.let { processUpdate(it) }
+            val (cStart, cEnd) = EditorIndexMapper.fromEditorToComposer(start, end, editable)
+                ?: return@withProcessor null
+            processInput(EditorInputAction.ReplaceText(text.toString(), cStart, cEnd))
+                ?.let { processUpdate(it) }
         }
 
         return if (result != null) {
@@ -150,8 +155,9 @@ internal class InterceptInputConnection(
             if (text?.lastOrNull() == '\n') {
                 processInput(EditorInputAction.InsertParagraph)
             } else {
-                viewModel.updateSelection(editable, start, end)
-                processInput(EditorInputAction.ReplaceText(text.toString()))
+                val (cStart, cEnd) = EditorIndexMapper.fromEditorToComposer(start, end, editable)
+                    ?: return@withProcessor null
+                processInput(EditorInputAction.ReplaceText(text.toString(), cStart, cEnd))
             }?.let { processUpdate(it) }
         }
 
@@ -271,7 +277,7 @@ internal class InterceptInputConnection(
         compositionEnd: Int,
     ) {
         beginBatchEdit()
-        editable.clear()
+        editable.clearRichTextSpans()
         editable.replace(0, editable.length, charSequence)
         setComposingRegion(compositionStart, compositionEnd)
         endBatchEdit()

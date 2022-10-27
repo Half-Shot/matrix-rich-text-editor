@@ -9,7 +9,7 @@ sealed interface EditorInputAction {
     /**
      * Replaces the text at the current selection with the provided [value] in plain text.
      */
-    data class ReplaceText(val value: CharSequence): EditorInputAction
+    data class ReplaceText(val value: CharSequence, val start: UInt, val end: UInt): EditorInputAction
 
     /**
      * Replaces the whole contents of the editor with the passed [html], re-creating the Dom.

@@ -4,15 +4,9 @@ import android.graphics.Typeface
 import android.text.SpannableString
 import android.text.SpannableStringBuilder
 import android.text.Spanned
-import android.text.style.BulletSpan
-import android.text.style.StrikethroughSpan
-import android.text.style.StyleSpan
-import android.text.style.UnderlineSpan
 import androidx.core.text.getSpans
 import io.element.android.wysiwyg.inputhandlers.models.InlineFormat
-import io.element.android.wysiwyg.spans.InlineCodeSpan
-import io.element.android.wysiwyg.spans.OrderedListSpan
-import io.element.android.wysiwyg.spans.ExtraCharacterSpan
+import io.element.android.wysiwyg.spans.*
 import org.ccil.cowan.tagsoup.Parser
 import org.xml.sax.Attributes
 import org.xml.sax.ContentHandler
@@ -149,7 +143,7 @@ internal class HtmlToSpansParser(
                     val textSize = 16f * resourcesProvider.getDisplayMetrics().scaledDensity
                     OrderedListSpan(typeface, textSize, last.order ?: 1, gapWidth)
                 } else {
-                    BulletSpan(gapWidth)
+                    UnorderedListSpan(gapWidth)
                 }
                 text.setSpan(span, newStart, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 text.removeSpan(last)
@@ -163,8 +157,8 @@ internal class HtmlToSpansParser(
 
     private fun handleFormatEndTag(format: InlineFormat) {
         val span = when (format) {
-            InlineFormat.Bold -> StyleSpan(Typeface.BOLD)
-            InlineFormat.Italic -> StyleSpan(Typeface.ITALIC)
+            InlineFormat.Bold -> BoldSpan()
+            InlineFormat.Italic -> ItalicSpan()
             InlineFormat.Underline -> UnderlineSpan()
             InlineFormat.StrikeThrough -> StrikethroughSpan()
             InlineFormat.InlineCode ->
@@ -179,8 +173,8 @@ internal class HtmlToSpansParser(
     }
     private fun handleHyperlinkEnd() {
         val last = getLast<Hyperlink>() ?: return
-        // TODO: use custom link span maybe
-        val span = UnderlineSpan()
+        // TODO: add some way to customise link color and appearance
+        val span = LinkSpan(resourcesProvider.getColor(android.R.color.holo_blue_dark))
         setSpanFromMark(last, span)
     }
 

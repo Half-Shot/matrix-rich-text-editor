@@ -5,6 +5,7 @@ import android.graphics.Rect
 import android.util.AttributeSet
 import android.view.LayoutInflater
 import android.view.View
+import androidx.core.widget.addTextChangedListener
 import com.google.android.material.textfield.TextInputLayout
 import io.element.android.wysiwyg.EditorEditText
 import io.element.android.wysiwyg.inputhandlers.models.InlineFormat
@@ -67,6 +68,10 @@ class RichTextEditor : TextInputLayout {
                     updateMenuState(state)
                 }
             }
+
+            editText.addTextChangedListener(onTextChanged = { text, start, before, count ->
+                println(count)
+            })
         }
     }
 
