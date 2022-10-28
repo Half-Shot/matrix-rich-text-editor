@@ -2,7 +2,7 @@ name: Android
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, "android/test-ci-in-linux" ]
   pull_request:
     branches: [ "main" ]
     types: [ labeled, synchronize, opened, reopened ]
@@ -19,10 +19,10 @@ jobs:
       github.event_name == 'push' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'Android'))
     name: Run all tests
-    runs-on: macos-latest
+    runs-on: macos-12
     strategy:
       matrix:
-        api-level: [28]
+        api-level: [31]
     steps:
       - uses: actions/checkout@v3
         with:
@@ -62,16 +62,20 @@ jobs:
             :library:assembleDebugUnitTest :library:assembleDebugAndroidTest ${{ env.CI_GRADLE_ARG_PROPERTIES }}
           cache-read-only: false
 
+#      - name: Install Haxm
+#        run: brew install --cask intel-haxm
+
       - name: Run all the tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           working-directory: platforms/android
           api-level: ${{ matrix.api-level }}
-          arch: x86
+          arch: x86_64
           profile: Nexus 5X
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
+          enable-hw-keyboard: true
           script: |
             ./gradlew :library:testDebugUnitTest :library:connectedDebugAndroidTest ${{ env.CI_GRADLE_ARG_PROPERTIES }}
 
